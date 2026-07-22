@@ -130,5 +130,14 @@ if(BUILD_TESTS)
     )
     target_include_directories(seqtrak_block_scan PRIVATE include)
     target_link_libraries(seqtrak_block_scan PRIVATE mk2_midi mk2_util)
+
+    # Tests whether selecting a factory preset (Bank Select + Program
+    # Change) actually populates the Sound Common Name SysEx block, or
+    # whether preset names only ever exist in companion editor apps.
+    add_executable(seqtrak_name_probe
+      tests/seqtrak_name_probe.cpp
+    )
+    target_include_directories(seqtrak_name_probe PRIVATE include)
+    target_link_libraries(seqtrak_name_probe PRIVATE mk2_midi mk2_util)
   endif()
 endif()
