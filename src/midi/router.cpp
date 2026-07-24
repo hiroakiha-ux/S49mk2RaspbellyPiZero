@@ -140,14 +140,18 @@ Mk2SeqtrakRouter::~Mk2SeqtrakRouter() { Stop(); }
 
 void Mk2SeqtrakRouter::Start() {
   if (running_.exchange(true)) return;
-  mk2_to_seqtrak_thread_ = std::thread([this] {
-    PumpLoop(mk2_port_, seqtrak_port_, "SEQTRAK", &on_mk2_to_seqtrak_,
-             &seqtrak_write_mutex_);
-  });
-  seqtrak_to_mk2_thread_ = std::thread([this] {
-    PumpLoop(seqtrak_port_, mk2_port_, "MK2", &on_seqtrak_to_mk2_,
-             &mk2_write_mutex_);
-  });
+  if (mk2_port_ != nullptr) {
+    mk2_to_seqtrak_thread_ = std::thread([this] {
+      PumpLoop(mk2_port_, seqtrak_port_, "SEQTRAK", &on_mk2_to_seqtrak_,
+               &seqtrak_write_mutex_);
+    });
+  }
+  if (seqtrak_port_ != nullptr) {
+    seqtrak_to_mk2_thread_ = std::thread([this] {
+      PumpLoop(seqtrak_port_, mk2_port_, "MK2", &on_seqtrak_to_mk2_,
+               &mk2_write_mutex_);
+    });
+  }
 }
 
 void Mk2SeqtrakRouter::Stop() {
@@ -182,6 +186,9 @@ bool Mk2SeqtrakRouter::WriteOrLog(AlsaRawMidiPort* to, const char* to_label,
                  mk2util::HexDump(bytes).c_str());
     return true;
   }
+  // Observation-only mode: keep reading and invoking the callback even when
+  // the destination device (normally SEQTRAK) is not connected.
+  if (to == nullptr) return true;
   std::lock_guard<std::mutex> lock(*to_write_mutex);
   return to->Write(bytes);
 }

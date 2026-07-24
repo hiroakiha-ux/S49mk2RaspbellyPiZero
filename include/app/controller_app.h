@@ -8,6 +8,8 @@
 #pragma once
 
 #include <atomic>
+#include <array>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -50,9 +52,16 @@ class ControllerApp {
   void Stop();
 
  private:
+  enum class LcdUiMode { kTrackSelect, kTrackTypeSelect, kTrackDetail };
+
   void DrawStartupScreens();
+  void DrawLeftLcdUi();
   void PollHidLoop();
   void HandleHidReport(const std::vector<uint8_t>& report);
+  void OnMk2MidiMessage(const mk2::MidiMessage& message);
+  void ApplyPendingMidiControls();
+  void MoveJogSelection(int delta);
+  void ConfirmJogSelection();
   void OnSequencerNoteEvent(const mk2seq::NoteEvent& event);
 
   std::unique_ptr<mk2::HidDevice> hid_device_;
@@ -63,6 +72,21 @@ class ControllerApp {
   std::unique_ptr<mk2seq::StepSequencer> sequencer_;
 
   std::vector<uint8_t> previous_hid_report_;
+  LcdUiMode lcd_ui_mode_ = LcdUiMode::kTrackSelect;
+  int selected_track_ = 0;
+  int selected_track_type_ = 0;
+  std::array<int, 11> track_types_{};
+  std::array<int, 11> track_volumes_ = {30, 30, 30, 30, 30, 30,
+                                        30, 30, 30, 30, 30};
+  std::array<int, 11> track_pans_{};
+  // The MK2 can send a knob's value update after a separate touch-OFF
+  // report, so remember which physical knob most recently became active.
+  int last_touched_knob_ = -1;
+  std::chrono::steady_clock::time_point last_knob2_touch_{};
+  std::array<std::atomic<int>, 2> pending_knob_cc_{
+      std::atomic<int>{-1}, std::atomic<int>{-1}};
+  int last_pan_midi_value_ = -1;
+  bool pan_rebased_after_reset_ = false;
   std::atomic<bool> running_{false};
   bool dry_run_ = false;
 };

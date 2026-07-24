@@ -139,7 +139,11 @@ construction) before letting it actually touch either instrument.
 - **MK2 -> SEQTRAK control mapping**: knobs and Function buttons are
   translated to the SEQTRAK's documented default CC assignment
   (`kDefaultKnobCcBase`/`kDefaultFunctionButtonCcBase` in
-  `mk2_protocol.h`, channel 1). It does not yet program the MK2's own
+  `mk2_protocol.h`, channel 1). On real hardware, knob rotation is received
+  through USB-MIDI Control Change messages, not through the HID knob-value
+  fields: Knob 1 is CC `0x0E`, Knob 2 is CC `0x0F`, and the third byte is
+  the absolute value `0..127`. HID byte 7 is used only for knob-touch
+  gestures. It does not yet program the MK2's own
   `0xA1` HID assignment report, drive Light Guide/button LED feedback from
   SEQTRAK state, or expose the jog wheel/pedals/touch-strip.
 - **LCD UI**: only a static two-color test frame; no text rendering, bar

@@ -1,6 +1,8 @@
 #include "app/controller_app.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <string>
 
 #include "display/lcd_packet.h"
 #include "mk2_protocol.h"
@@ -19,6 +21,40 @@ namespace {
 // of that assignment, so the CC map here is what this bridge chooses to send
 // onward to SEQTRAK regardless of how the MK2's own assignment is set.
 constexpr int kControlChannel = mk2::kDefaultControlsMidiChannel;
+constexpr const char* kTrackTypeNames[] = {"Drum", "DrumKit", "Synth"};
+constexpr int kVolumeMin = 0;
+constexpr int kVolumeMax = 100;
+constexpr int kPanMin = -50;
+constexpr int kPanMax = 50;
+constexpr auto kKnobDoubleTouchMin = std::chrono::milliseconds(80);
+constexpr auto kKnobDoubleTouchMax = std::chrono::milliseconds(500);
+
+int WrappedDelta(int previous, int current, int modulo) {
+  int delta = current - previous;
+  if (delta > modulo / 2) delta -= modulo;
+  if (delta < -modulo / 2) delta += modulo;
+  return delta;
+}
+
+void FillRoundedRect(mk2::LcdCanvas& canvas, int x, int y, int w, int h,
+                     int radius, uint8_t r, uint8_t g, uint8_t b) {
+  if (w <= 0 || h <= 0) return;
+  radius = std::min({radius, w / 2, h / 2});
+  canvas.FillRect(x + radius, y, w - 2 * radius, h, r, g, b);
+  canvas.FillRect(x, y + radius, w, h - 2 * radius, r, g, b);
+  for (int inset = 1; inset <= radius; ++inset) {
+    canvas.FillRect(x + radius - inset, y + inset - 1,
+                    w - 2 * (radius - inset), 1, r, g, b);
+    canvas.FillRect(x + radius - inset, y + h - inset,
+                    w - 2 * (radius - inset), 1, r, g, b);
+  }
+}
+
+void DrawShinonomeText(mk2::LcdCanvas& canvas, int x, int y,
+                       const std::string& text, uint8_t r, uint8_t g,
+                       uint8_t b) {
+  canvas.DrawTextUtf8(x, y, text, 1, r, g, b);
+}
 
 bool EventActive(const std::vector<uint8_t>& report,
                   const mk2::ButtonInputEvent& event) {
@@ -61,21 +97,29 @@ bool ControllerApp::Initialize() {
 
   mk2_midi_port_ = std::make_unique<mk2::AlsaRawMidiPort>();
   if (!mk2_midi_port_->OpenByNameSubstring("KOMPLETE KONTROL")) {
-    std::fprintf(stderr, "controller_app: MK2 MIDI port open failed: %s\n",
+    std::fprintf(stderr,
+                 "controller_app: MK2 MIDI port unavailable (LCD-only mode): %s\n",
                  mk2_midi_port_->last_error().c_str());
-    return false;
+    mk2_midi_port_.reset();
   }
 
   seqtrak_midi_port_ = std::make_unique<mk2::AlsaRawMidiPort>();
   if (!seqtrak_midi_port_->OpenByNameSubstring("SEQTRAK")) {
     std::fprintf(stderr,
-                 "controller_app: SEQTRAK MIDI port open failed: %s\n",
+                 "controller_app: SEQTRAK MIDI port unavailable "
+                 "(LCD-only mode): %s\n",
                  seqtrak_midi_port_->last_error().c_str());
-    return false;
+    seqtrak_midi_port_.reset();
   }
 
-  router_ = std::make_unique<mk2::Mk2SeqtrakRouter>(
-      mk2_midi_port_.get(), seqtrak_midi_port_.get(), dry_run_);
+  if (mk2_midi_port_) {
+    router_ = std::make_unique<mk2::Mk2SeqtrakRouter>(
+        mk2_midi_port_.get(), seqtrak_midi_port_.get(), dry_run_);
+    router_->SetOnMk2ToSeqtrakMessage(
+        [this](const mk2::MidiMessage& message) {
+          OnMk2MidiMessage(message);
+        });
+  }
 
   sequencer_ = std::make_unique<mk2seq::StepSequencer>();
   sequencer_->SetNoteEventCallback(
@@ -106,25 +150,111 @@ void SendOrPreviewLcdPacket(mk2::LcdBulkDevice* lcd_device, bool dry_run,
 void ControllerApp::DrawStartupScreens() {
   if (lcd_device_ == nullptr && !dry_run_) return;
 
-  mk2::LcdCanvas left;
-  left.Clear(0, 0, 0);
-  left.FillRect(16, 16, mk2::kLcdWidth - 32, mk2::kLcdHeight - 32, 0, 40, 0);
-  left.DrawRect(0, 0, mk2::kLcdWidth, mk2::kLcdHeight, 0, 255, 0);
-  SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
-                         mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+  DrawLeftLcdUi();
 
+  // The right LCD is intentionally left blank until it gets its own UI.
   mk2::LcdCanvas right;
   right.Clear(0, 0, 0);
-  right.FillRect(16, 16, mk2::kLcdWidth - 32, mk2::kLcdHeight - 32, 0, 0, 40);
-  right.DrawRect(0, 0, mk2::kLcdWidth, mk2::kLcdHeight, 0, 128, 255);
   SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "right",
                          mk2::BuildLcdPacket(mk2::kLcdScreenRight, right));
+}
+
+void ControllerApp::DrawLeftLcdUi() {
+  if (lcd_device_ == nullptr && !dry_run_) return;
+
+  mk2::LcdCanvas left;
+  left.Clear(0, 0, 0);
+
+  constexpr int kGap = 6;
+  constexpr int kButtonHeight = 32;
+  constexpr int kPaddingX = 12;
+  constexpr int kRowY[] = {10, 50};
+  constexpr int kRowStart[] = {0, 6};
+  constexpr int kRowEnd[] = {6, 11};
+
+  for (int row = 0; row < 2; ++row) {
+    int total_width = 0;
+    for (int i = kRowStart[row]; i < kRowEnd[row]; ++i) {
+      total_width +=
+          mk2::LcdCanvas::MeasureUtf8Width(seqtrak::kTracks[i].name, 1) +
+          2 * kPaddingX;
+    }
+    total_width += (kRowEnd[row] - kRowStart[row] - 1) * kGap;
+    int x = (mk2::kLcdWidth - total_width) / 2;
+    for (int i = kRowStart[row]; i < kRowEnd[row]; ++i) {
+      const std::string name = seqtrak::kTracks[i].name;
+      int width = mk2::LcdCanvas::MeasureUtf8Width(name, 1) + 2 * kPaddingX;
+      bool selected = i == selected_track_;
+      FillRoundedRect(left, x, kRowY[row], width, kButtonHeight, 6,
+                      selected ? 242 : 27, selected ? 184 : 32,
+                      selected ? 75 : 40);
+      left.DrawRect(x, kRowY[row], width, kButtonHeight,
+                    selected ? 255 : 102, selected ? 215 : 112,
+                    selected ? 122 : 128);
+      DrawShinonomeText(left, x + kPaddingX, kRowY[row] + 8, name,
+                        selected ? 17 : 244, selected ? 19 : 247,
+                        selected ? 24 : 250);
+      x += width + kGap;
+    }
+  }
+
+  if (lcd_ui_mode_ != LcdUiMode::kTrackSelect) {
+    bool has_track_type =
+        selected_track_ != 9 && selected_track_ != 10;  // DX / SAMPLER
+    if (has_track_type) {
+      DrawShinonomeText(left, 12, 105, "TrackType", 244, 247, 250);
+      constexpr int kOptionX[] = {118, 222, 350};
+      for (int i = 0; i < 3; ++i) {
+        bool selected = track_types_[selected_track_] == i;
+        left.DrawRect(kOptionX[i], 105, 16, 16, selected ? 242 : 122,
+                      selected ? 184 : 132, selected ? 75 : 146);
+        if (selected) {
+          left.FillRect(kOptionX[i] + 5, 110, 6, 6, 242, 184, 75);
+        }
+        DrawShinonomeText(left, kOptionX[i] + 22, 105, kTrackTypeNames[i],
+                          selected ? 242 : 244, selected ? 184 : 247,
+                          selected ? 75 : 250);
+      }
+    }
+
+    const int volume = track_volumes_[selected_track_];
+    DrawShinonomeText(left, 12, 157, "Volume", 244, 247, 250);
+    DrawShinonomeText(left, 96, 157, "0", 170, 179, 192);
+    FillRoundedRect(left, 112, 160, 300, 10, 5, 37, 43, 52);
+    FillRoundedRect(left, 112, 160, 3 * volume, 10, 5, 79, 195, 247);
+    int volume_x = 112 + 3 * volume;
+    FillRoundedRect(left, volume_x - 4, 155, 8, 20, 3, 234, 248, 255);
+    DrawShinonomeText(left, 420, 157, "100", 170, 179, 192);
+    DrawShinonomeText(left, std::clamp(volume_x - 12, 112, 388), 136,
+                      std::to_string(volume) + "%", 79, 195, 247);
+
+    const int pan = track_pans_[selected_track_];
+    DrawShinonomeText(left, 12, 213, "Pan", 244, 247, 250);
+    DrawShinonomeText(left, 96, 213, "L", 170, 179, 192);
+    FillRoundedRect(left, 112, 216, 300, 10, 5, 37, 43, 52);
+    int pan_x = 262 + (pan * 150) / kPanMax;
+    left.FillRect(260, 216, 4, 10, 79, 195, 247);
+    if (pan < 0) {
+      left.FillRect(pan_x, 216, 262 - pan_x, 10, 79, 195, 247);
+    } else if (pan > 0) {
+      left.FillRect(262, 216, pan_x - 262, 10, 79, 195, 247);
+    }
+    FillRoundedRect(left, pan_x - 6, 211, 12, 20, 4, 234, 248, 255);
+    DrawShinonomeText(left, 424, 213, "R", 170, 179, 192);
+    const std::string pan_text =
+        pan > 0 ? "+" + std::to_string(pan) : std::to_string(pan);
+    DrawShinonomeText(left, std::clamp(pan_x - 12, 112, 388), 192,
+                      pan_text, 79, 195, 247);
+  }
+
+  SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                         mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
 }
 
 void ControllerApp::Run() {
   running_.store(true);
   DrawStartupScreens();
-  router_->Start();
+  if (router_) router_->Start();
   sequencer_->SetTempoBpm(120.0);
   sequencer_->Start();
   PollHidLoop();
@@ -139,14 +269,148 @@ void ControllerApp::Stop() {
 void ControllerApp::PollHidLoop() {
   while (running_.load()) {
     auto report = hid_device_->ReadReport(/*timeout_ms=*/50);
-    if (!report.has_value()) continue;
-    HandleHidReport(*report);
-    previous_hid_report_ = *report;
+    if (report.has_value()) {
+      HandleHidReport(*report);
+      previous_hid_report_ = *report;
+    }
+    ApplyPendingMidiControls();
   }
 }
 
+void ControllerApp::OnMk2MidiMessage(const mk2::MidiMessage& message) {
+  if (message.kind != mk2::MidiMessageKind::kControlChange) return;
+  const int knob = message.data1 - mk2::kDefaultKnobCcBase;
+  if (knob < 0 || knob >= 2) return;
+
+  std::fprintf(stderr, "controller_app: MIDI Knob%d CC=0x%02x value=%d\n",
+               knob + 1, message.data1, message.data2);
+  pending_knob_cc_[knob].store(message.data2);
+}
+
+void ControllerApp::ApplyPendingMidiControls() {
+  if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
+    pending_knob_cc_[0].store(-1);
+    pending_knob_cc_[1].store(-1);
+    return;
+  }
+
+  bool changed = false;
+  const int volume_cc = pending_knob_cc_[0].exchange(-1);
+  if (volume_cc >= 0) {
+    track_volumes_[selected_track_] =
+        std::clamp((volume_cc * kVolumeMax + 63) / 127, kVolumeMin,
+                   kVolumeMax);
+    std::fprintf(stderr, "controller_app: Knob1 applied: track=%d Volume=%d\n",
+                 selected_track_ + 1, track_volumes_[selected_track_]);
+    changed = true;
+  }
+
+  const int pan_cc = pending_knob_cc_[1].exchange(-1);
+  if (pan_cc >= 0) {
+    if (pan_rebased_after_reset_) {
+      if (last_pan_midi_value_ >= 0) {
+        const int delta = WrappedDelta(last_pan_midi_value_, pan_cc, 128);
+        track_pans_[selected_track_] =
+            std::clamp(track_pans_[selected_track_] + delta, kPanMin,
+                       kPanMax);
+      }
+      // With no previous CC, the first value only establishes the new
+      // physical reference and leaves the reset value at zero.
+    } else {
+      // Before a reset, MIDI midpoint 64 is center. Map 0..127 to -50..+50.
+      track_pans_[selected_track_] =
+          std::clamp(((pan_cc - 64) * kPanMax) / 63, kPanMin, kPanMax);
+    }
+    last_pan_midi_value_ = pan_cc;
+    std::fprintf(stderr, "controller_app: Knob2 applied: track=%d Pan=%d\n",
+                 selected_track_ + 1, track_pans_[selected_track_]);
+    changed = true;
+  }
+
+  if (changed) DrawLeftLcdUi();
+}
+
 void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
-  if (report.empty() || report[0] != mk2::kHidReportInput) return;
+  if (report.empty()) return;
+  if (report[0] != mk2::kHidReportInput) {
+    std::fprintf(stderr,
+                 "controller_app: non-0x01 HID report id=0x%02x len=%zu:",
+                 report[0], report.size());
+    for (uint8_t byte : report) std::fprintf(stderr, " %02x", byte);
+    std::fprintf(stderr, "\n");
+    return;
+  }
+
+  // Knob-map diagnostics: report touch transitions even when the associated
+  // value does not change, and show every raw HID byte that changed. This
+  // makes it possible to correct the map on firmware whose layout differs
+  // from the currently documented byte 7 / bytes 10..25 layout.
+  if (!previous_hid_report_.empty() &&
+      previous_hid_report_.size() == report.size()) {
+    const uint8_t previous_touch =
+        previous_hid_report_.size() >
+                static_cast<size_t>(mk2::kInputByteKnobTouch)
+            ? previous_hid_report_[mk2::kInputByteKnobTouch]
+            : 0;
+    const uint8_t current_touch =
+        report.size() > static_cast<size_t>(mk2::kInputByteKnobTouch)
+            ? report[mk2::kInputByteKnobTouch]
+            : 0;
+    if (previous_touch != current_touch) {
+      std::fprintf(stderr,
+                   "controller_app: knob touch byte: 0x%02x -> 0x%02x\n",
+                   previous_touch, current_touch);
+      for (int knob = 0; knob < mk2::kKnobCount; ++knob) {
+        const uint8_t mask = mk2::kKnobTouchMasks[knob];
+        const bool was_touched = (previous_touch & mask) != 0;
+        const bool is_touched = (current_touch & mask) != 0;
+        if (was_touched != is_touched) {
+          std::fprintf(stderr, "controller_app: Knob%d touch %s\n", knob + 1,
+                       is_touched ? "ON" : "OFF");
+          if (is_touched) {
+            last_touched_knob_ = knob;
+
+            // Knob 2 double-touch is a quick Pan-center gesture. Rotation
+            // values themselves arrive as MIDI CC 0x0F; only capacitive
+            // touch gestures come from this HID report.
+            if (knob == 1 && lcd_ui_mode_ != LcdUiMode::kTrackSelect) {
+              const auto now = std::chrono::steady_clock::now();
+              const auto interval = now - last_knob2_touch_;
+              if (last_knob2_touch_ !=
+                      std::chrono::steady_clock::time_point{} &&
+                  interval >= kKnobDoubleTouchMin &&
+                  interval <= kKnobDoubleTouchMax) {
+                track_pans_[selected_track_] = 0;
+                // CC 0x0F is absolute. Rebase subsequent turns on the
+                // physical value seen before this reset.
+                pan_rebased_after_reset_ = true;
+                last_knob2_touch_ = {};
+                std::fprintf(
+                    stderr,
+                    "controller_app: Knob2 double-touch: track=%d Pan=0\n",
+                    selected_track_ + 1);
+                DrawLeftLcdUi();
+              } else {
+                last_knob2_touch_ = now;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    bool printed_prefix = false;
+    for (size_t byte = 1; byte < report.size(); ++byte) {
+      if (previous_hid_report_[byte] == report[byte]) continue;
+      if (!printed_prefix) {
+        std::fprintf(stderr, "controller_app: HID changed bytes:");
+        printed_prefix = true;
+      }
+      std::fprintf(stderr, " [%zu]=%02x->%02x", byte,
+                   previous_hid_report_[byte], report[byte]);
+    }
+    if (printed_prefix) std::fprintf(stderr, "\n");
+  }
 
   // Function buttons 1..8 -> CC22..29 (press = value 127, per SEQTRAK CC
   // table's expectation of "value 127 for the default toggle/action test").
@@ -163,8 +427,56 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
     if (is_down && !was_down) {
       uint8_t cc = static_cast<uint8_t>(
           mk2::kDefaultFunctionButtonCcBase + static_cast<int>(i));
-      router_->SendToSeqtrak(
-          mk2::BuildControlChange(kControlChannel, cc, 127));
+      if (router_) {
+        router_->SendToSeqtrak(
+            mk2::BuildControlChange(kControlChannel, cc, 127));
+      }
+    }
+  }
+
+  bool ui_changed = false;
+  const uint8_t current_jog_control =
+      report.size() > static_cast<size_t>(mk2::kInputByteJogControl)
+          ? report[mk2::kInputByteJogControl]
+          : mk2::kJogIdle;
+  const uint8_t previous_jog_control =
+      previous_hid_report_.size() >
+              static_cast<size_t>(mk2::kInputByteJogControl)
+          ? previous_hid_report_[mk2::kInputByteJogControl]
+          : mk2::kJogIdle;
+
+  // Byte 30 is only a meaningful rotation counter while the jog wheel is
+  // being touched. Other control activity can arrive in the same HID report,
+  // so interpreting every byte-30 change as a jog turn can move the UI while
+  // an LCD knob is being operated.
+  if (!previous_hid_report_.empty() &&
+      (current_jog_control == mk2::kJogTouch ||
+       previous_jog_control == mk2::kJogTouch) &&
+      report.size() > static_cast<size_t>(mk2::kInputByteJogTurn) &&
+      previous_hid_report_.size() > static_cast<size_t>(mk2::kInputByteJogTurn)) {
+    int delta = WrappedDelta(
+        previous_hid_report_[mk2::kInputByteJogTurn] & 0x0F,
+        report[mk2::kInputByteJogTurn] & 0x0F, 16);
+    if (delta != 0) {
+      MoveJogSelection(delta);
+      ui_changed = true;
+    }
+  }
+
+  if (report.size() > static_cast<size_t>(mk2::kInputByteJogControl)) {
+    uint8_t current = current_jog_control;
+    uint8_t previous = previous_jog_control;
+    if (current != previous) {
+      if (current == mk2::kJogLeft) {
+        MoveJogSelection(-1);
+        ui_changed = true;
+      } else if (current == mk2::kJogRight) {
+        MoveJogSelection(1);
+        ui_changed = true;
+      } else if (current == mk2::kJogPress) {
+        ConfirmJogSelection();
+        ui_changed = true;
+      }
     }
   }
 
@@ -184,13 +496,103 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
           report[offset] | (report[offset + 1] << 8));
       if (prev_value == cur_value) continue;
 
+      const uint8_t touch_mask = mk2::kKnobTouchMasks[knob];
+      const bool knob_is_touched =
+          report.size() > static_cast<size_t>(mk2::kInputByteKnobTouch) &&
+          (report[mk2::kInputByteKnobTouch] & touch_mask) != 0;
+      const bool knob_was_touched =
+          previous_hid_report_.size() >
+                  static_cast<size_t>(mk2::kInputByteKnobTouch) &&
+          (previous_hid_report_[mk2::kInputByteKnobTouch] & touch_mask) != 0;
+      const bool knob_is_being_operated =
+          knob_is_touched || knob_was_touched;
+      // `knob` is the value slot described by the current protocol map.
+      // Some units deliver that slot after touch has already gone low (and
+      // field logs suggest the slot order can differ), so use the last
+      // physical touch as the authoritative control identity.
+      const int physical_knob =
+          last_touched_knob_ >= 0 ? last_touched_knob_ : knob;
+      const int delta =
+          WrappedDelta(prev_value, cur_value, mk2::kKnobValueModulo);
+
+      std::fprintf(stderr,
+                   "controller_app: value_slot=%d physical_Knob%d "
+                   "touch=%s (previous=%s) "
+                   "raw=%u -> %u delta=%d "
+                   "touch_byte=0x%02x ui_mode=%d\n",
+                   knob + 1, physical_knob + 1,
+                   knob_is_touched ? "yes" : "no",
+                   knob_was_touched ? "yes" : "no", prev_value, cur_value,
+                   delta,
+                   report.size() >
+                           static_cast<size_t>(mk2::kInputByteKnobTouch)
+                       ? report[mk2::kInputByteKnobTouch]
+                       : 0,
+                   static_cast<int>(lcd_ui_mode_));
+
+      // In the track settings screens, LCD knob 1 edits Volume (0..100) and
+      // knob 2 edits Pan (-50..50). Positive hardware deltas are clockwise;
+      // negative deltas are counter-clockwise.
+      if (lcd_ui_mode_ != LcdUiMode::kTrackSelect && physical_knob < 2 &&
+          (knob_is_being_operated || last_touched_knob_ >= 0)) {
+        int step = std::clamp(delta, -10, 10);
+        if (physical_knob == 0) {
+          int& volume = track_volumes_[selected_track_];
+          volume = std::clamp(volume + step, kVolumeMin, kVolumeMax);
+          std::fprintf(stderr,
+                       "controller_app: Knob1 applied: track=%d Volume=%d\n",
+                       selected_track_ + 1, volume);
+        } else {
+          int& pan = track_pans_[selected_track_];
+          pan = std::clamp(pan + step, kPanMin, kPanMax);
+          std::fprintf(stderr,
+                       "controller_app: Knob2 applied: track=%d Pan=%d\n",
+                       selected_track_ + 1, pan);
+        }
+        ui_changed = true;
+        continue;
+      } else if (physical_knob < 2) {
+        std::fprintf(stderr,
+                     "controller_app: Knob%d not applied (%s%s)\n",
+                     physical_knob + 1,
+                     lcd_ui_mode_ == LcdUiMode::kTrackSelect
+                         ? "track selection screen"
+                         : "",
+                     !knob_is_being_operated ? "touch bit is off" : "");
+      }
+
       uint8_t cc =
           static_cast<uint8_t>(mk2::kDefaultKnobCcBase + knob);
       uint8_t cc_value = static_cast<uint8_t>(
           (static_cast<uint32_t>(cur_value) * 127) / (mk2::kKnobValueModulo - 1));
-      router_->SendToSeqtrak(
-          mk2::BuildControlChange(kControlChannel, cc, cc_value));
+      if (router_) {
+        router_->SendToSeqtrak(
+            mk2::BuildControlChange(kControlChannel, cc, cc_value));
+      }
     }
+  }
+
+  if (ui_changed) DrawLeftLcdUi();
+}
+
+void ControllerApp::MoveJogSelection(int delta) {
+  if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
+    int count = static_cast<int>(seqtrak::kTrackCount);
+    selected_track_ = (selected_track_ + delta % count + count) % count;
+  } else if (lcd_ui_mode_ == LcdUiMode::kTrackTypeSelect) {
+    constexpr int count = 3;
+    int& type = track_types_[selected_track_];
+    type = (type + delta % count + count) % count;
+  }
+}
+
+void ControllerApp::ConfirmJogSelection() {
+  if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
+    lcd_ui_mode_ = (selected_track_ == 9 || selected_track_ == 10)
+                       ? LcdUiMode::kTrackDetail
+                       : LcdUiMode::kTrackTypeSelect;
+  } else if (lcd_ui_mode_ == LcdUiMode::kTrackTypeSelect) {
+    lcd_ui_mode_ = LcdUiMode::kTrackDetail;
   }
 }
 
@@ -201,10 +603,12 @@ void ControllerApp::OnSequencerNoteEvent(const mk2seq::NoteEvent& event) {
   }
   int channel = seqtrak::kTracks[event.track_index].midi_channel;
   if (event.note_on) {
-    router_->SendToSeqtrak(
-        mk2::BuildNoteOn(channel, event.note, event.velocity));
+    if (router_) {
+      router_->SendToSeqtrak(
+          mk2::BuildNoteOn(channel, event.note, event.velocity));
+    }
   } else {
-    router_->SendToSeqtrak(mk2::BuildNoteOff(channel, event.note));
+    if (router_) router_->SendToSeqtrak(mk2::BuildNoteOff(channel, event.note));
   }
 }
 
