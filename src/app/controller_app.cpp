@@ -234,6 +234,24 @@ void ControllerApp::DrawLeftLcdUi() {
                            mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
     return;
   }
+  if (current_screen_ == ScreenId::kSettings) {
+    DrawSettings(left);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    return;
+  }
+  if (current_screen_ == ScreenId::kKeySplit) {
+    DrawKeySplit(left);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    return;
+  }
+  if (current_screen_ == ScreenId::kSetCcPc) {
+    DrawSetCcPc(left);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    return;
+  }
 
   constexpr int kGap = 6;
   constexpr int kButtonHeight = 32;
@@ -404,6 +422,113 @@ void ControllerApp::DrawMidiLog(mk2::LcdCanvas& canvas) {
   }
 }
 
+void ControllerApp::DrawSettings(mk2::LcdCanvas& canvas) {
+  constexpr int kHeaderHeight = 28;
+  canvas.FillRect(0, 0, mk2::kLcdWidth, kHeaderHeight, 27, 32, 40);
+  canvas.DrawRect(0, 0, mk2::kLcdWidth, kHeaderHeight, 82, 97, 109);
+
+  const bool prev_selected = selected_settings_item_ == 0;
+  FillRoundedRect(canvas, 8, 4, 64, 20, 3, prev_selected ? 0 : 32,
+                  prev_selected ? 215 : 42, prev_selected ? 255 : 51);
+  DrawShinonomeText(canvas, 20, 6, "Prev.", prev_selected ? 6 : 170,
+                    prev_selected ? 16 : 179, prev_selected ? 20 : 192);
+
+  const std::string title = "Settings";
+  const int title_width = mk2::LcdCanvas::MeasureUtf8Width(title, 1);
+  DrawShinonomeText(canvas, (mk2::kLcdWidth - title_width) / 2, 6, title,
+                    244, 247, 250);
+
+  constexpr const char* kLabels[] = {
+      "S49MK2", "Key Split", "Set CC/PC", "SERTRAK", "Controller"};
+  constexpr int kButtonX[] = {12, 168, 324, 90, 246};
+  constexpr int kButtonY[] = {50, 50, 50, 136, 136};
+  constexpr int kButtonWidth = 144;
+  constexpr int kButtonHeight = 66;
+  for (size_t i = 0; i < std::size(kLabels); ++i) {
+    const bool selected = selected_settings_item_ == static_cast<int>(i) + 1;
+    FillRoundedRect(canvas, kButtonX[i], kButtonY[i], kButtonWidth,
+                    kButtonHeight, 4, selected ? 0 : 32,
+                    selected ? 215 : 42, selected ? 255 : 51);
+    canvas.DrawRect(kButtonX[i], kButtonY[i], kButtonWidth, kButtonHeight,
+                    selected ? 184 : 82, selected ? 245 : 97,
+                    selected ? 255 : 109);
+    const int label_width =
+        mk2::LcdCanvas::MeasureUtf8Width(kLabels[i], 1);
+    DrawShinonomeText(canvas,
+                      kButtonX[i] + (kButtonWidth - label_width) / 2,
+                      kButtonY[i] + 25, kLabels[i], selected ? 6 : 242,
+                      selected ? 16 : 247, selected ? 20 : 249);
+  }
+}
+
+void ControllerApp::DrawKeySplit(mk2::LcdCanvas& canvas) {
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  DrawShinonomeText(canvas, 12, 6, "Key Split", 244, 247, 250);
+  constexpr const char* kActions[] = {"OK", "Cancel"};
+  constexpr int kActionX[] = {340, 388};
+  constexpr int kActionWidth[] = {40, 76};
+  for (int i = 0; i < 2; ++i) {
+    const bool selected = selected_dialog_action_ == i;
+    FillRoundedRect(canvas, kActionX[i], 4, kActionWidth[i], 20, 3,
+                    selected ? 0 : 32, selected ? 215 : 42,
+                    selected ? 255 : 51);
+    DrawShinonomeText(canvas, kActionX[i] + 8, 6, kActions[i],
+                      selected ? 6 : 170, selected ? 16 : 179,
+                      selected ? 20 : 192);
+  }
+
+  DrawShinonomeText(canvas, 12, 38, "Zones: 1", 244, 247, 250);
+  DrawShinonomeText(canvas, 12, 58, "Zone01:C2-G8 CH:1 Trans:C2", 244, 247,
+                    250);
+  canvas.FillRect(326, 59, 12, 12, 79, 195, 247);
+  for (int zone = 2; zone <= 11; ++zone) {
+    char line[64];
+    std::snprintf(line, sizeof(line), "Zone%02d: -- disabled --", zone);
+    DrawShinonomeText(canvas, 12, 58 + (zone - 1) * 18, line, 82, 97, 109);
+  }
+}
+
+void ControllerApp::DrawSetCcPc(mk2::LcdCanvas& canvas) {
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  DrawShinonomeText(canvas, 12, 6, "Page 1", 244, 247, 250);
+  constexpr const char* kActions[] = {"OK", "Cancel"};
+  constexpr int kActionX[] = {340, 388};
+  constexpr int kActionWidth[] = {40, 76};
+  for (int i = 0; i < 2; ++i) {
+    const bool selected = selected_dialog_action_ == i;
+    FillRoundedRect(canvas, kActionX[i], 4, kActionWidth[i], 20, 3,
+                    selected ? 0 : 32, selected ? 215 : 42,
+                    selected ? 255 : 51);
+    DrawShinonomeText(canvas, kActionX[i] + 8, 6, kActions[i],
+                      selected ? 6 : 170, selected ? 16 : 179,
+                      selected ? 20 : 192);
+  }
+
+  DrawShinonomeText(canvas, 12, 38, "CONTROL       TYPE NUM", 170, 179, 192);
+  DrawShinonomeText(canvas, 252, 38, "CONTROL      TYPE NUM", 170, 179, 192);
+  for (int row = 0; row < 10; ++row) {
+    char left[48];
+    char right[48];
+    if (row < 8) {
+      std::snprintf(left, sizeof(left), "Knob %d       CC  000", row + 1);
+      std::snprintf(right, sizeof(right), "Button %d    CC  000", row + 1);
+    } else {
+      std::snprintf(left, sizeof(left), "Pedal %c      CC  000",
+                    row == 8 ? 'A' : 'B');
+      if (row == 8) {
+        std::snprintf(right, sizeof(right), "Touch Strip CC  000");
+      } else {
+        right[0] = '\0';
+      }
+    }
+    const int y = 58 + row * 20;
+    DrawShinonomeText(canvas, 12, y, left, 244, 247, 250);
+    if (right[0] != '\0') {
+      DrawShinonomeText(canvas, 252, y, right, 244, 247, 250);
+    }
+  }
+}
+
 void ControllerApp::Run() {
   running_.store(true);
   DrawStartupScreens();
@@ -495,11 +620,9 @@ void ControllerApp::ActivateAction(ActionId action) {
       std::fprintf(stderr, "controller_app: screen -> Sound Select\n");
       break;
     case ActionId::kSetting:
-      current_screen_ = ScreenId::kControllerHome;
-      selected_home_button_ = 2;
-      std::fprintf(stderr,
-                   "controller_app: Setting action is reserved for a future "
-                   "screen\n");
+      current_screen_ = ScreenId::kSettings;
+      selected_settings_item_ = 0;
+      std::fprintf(stderr, "controller_app: screen -> Settings\n");
       break;
   }
   DrawLeftLcdUi();
@@ -831,6 +954,20 @@ void ControllerApp::MoveJogSelection(int delta) {
         (selected_home_button_ + delta % count + count) % count;
     return;
   }
+  if (current_screen_ == ScreenId::kSettings) {
+    constexpr int count = 6;
+    selected_settings_item_ =
+        (selected_settings_item_ + delta % count + count) % count;
+    return;
+  }
+  if (current_screen_ == ScreenId::kKeySplit ||
+      current_screen_ == ScreenId::kSetCcPc) {
+    constexpr int count = 2;
+    selected_dialog_action_ =
+        (selected_dialog_action_ + delta % count + count) % count;
+    return;
+  }
+  if (current_screen_ != ScreenId::kSoundSelect) return;
 
   if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
     int count = static_cast<int>(seqtrak::kTrackCount);
@@ -851,6 +988,37 @@ void ControllerApp::ConfirmJogSelection() {
     ReturnToControllerHome();
     return;
   }
+  if (current_screen_ == ScreenId::kSettings) {
+    switch (selected_settings_item_) {
+      case 0:
+        ReturnToControllerHome();
+        break;
+      case 2:
+        current_screen_ = ScreenId::kKeySplit;
+        selected_dialog_action_ = 0;
+        std::fprintf(stderr, "controller_app: screen -> Key Split\n");
+        break;
+      case 3:
+        current_screen_ = ScreenId::kSetCcPc;
+        selected_dialog_action_ = 0;
+        std::fprintf(stderr, "controller_app: screen -> Set CC/PC\n");
+        break;
+      default:
+        std::fprintf(stderr,
+                     "controller_app: selected Settings item is not yet "
+                     "implemented\n");
+        break;
+    }
+    return;
+  }
+  if (current_screen_ == ScreenId::kKeySplit ||
+      current_screen_ == ScreenId::kSetCcPc) {
+    std::fprintf(stderr, "controller_app: %s -> Settings\n",
+                 selected_dialog_action_ == 0 ? "OK" : "Cancel");
+    current_screen_ = ScreenId::kSettings;
+    return;
+  }
+  if (current_screen_ != ScreenId::kSoundSelect) return;
 
   if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
     lcd_ui_mode_ = (selected_track_ == 9 || selected_track_ == 10)

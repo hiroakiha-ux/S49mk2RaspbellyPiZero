@@ -8,7 +8,7 @@
    ├─ Play → MIDIスルーを開始してMIDI LOGへ移動
    │  └─ Prev. → SEQTRAK Controller
    ├─ Sound Select → S49 MK2 LCD — Variation 01 — Shinonome12
-   └─ Setting → Settings（将来実装）
+   └─ Setting → Settings
       └─ Key Split → Key Split（将来実装）
       └─ Set CC/PC → Set CC/PC（将来実装）
 ```
@@ -154,7 +154,7 @@
 
 ## SCR-009: Setting
 
-- 状態: 設計済み
+- 状態: 一部実装（画面表示、項目選択、定義済み画面への遷移）
 - サイズ: 480 × 272 px
 - Penpotキャンバス名: Settings
 - レイアウト: ヘッダー28 px、ボタン3列
@@ -174,7 +174,7 @@
 
 ## SCR-010: Key Split
 
-- 状態: 設計済み
+- 状態: 一部実装（画面表示とOK／Cancel遷移）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、本文17行、行ピッチ14 px
 - 用途: S49 MK2の鍵盤分割を設定する
@@ -214,7 +214,7 @@
 
 ## SCR-011: Set CC/PC
 
-- 状態: 設計済み
+- 状態: 一部実装（画面表示とOK／Cancel遷移）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、2列、行ピッチ22 px
 - 用途: S49 MK2のCC/PC割り当てを設定する

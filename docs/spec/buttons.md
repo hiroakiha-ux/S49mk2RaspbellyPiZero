@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | BTN-001 | SEQTRAK Controller | Play | MIDIスルーを有効にしてSCR-012へ移動する | 実装済み |
 | BTN-002 | SEQTRAK Controller | Sound Select | SCR-002へ移動する | 実装済み |
-| BTN-003 | SEQTRAK Controller | Setting | Setting画面へ移動する | 未実装 |
+| BTN-003 | SEQTRAK Controller | Setting | Setting画面へ移動する | 実装済み |
 | BTN-010～020 | Variation 01 | KICK～SAMPLER | 対象トラックを選択する | 実装済み |
 | BTN-030～044 | Drum Sound Category | PDF記載のカテゴリ名 | カテゴリを選び、Sound Listへ移動する | 未実装 |
 | BTN-050～064 | Synth Sound Category | PDF記載のカテゴリ名 | カテゴリを選び、Sound Listへ移動する | 未実装 |
@@ -24,14 +24,14 @@
 | BTN-150 | Settings | S49MK2 | S49 MK2設定画面へ移動する | 未実装 |
 | BTN-151 | Settings | SERTRAK | SEQTRAK設定画面へ移動する | 未実装 |
 | BTN-152 | Settings | Controller | Controller設定画面へ移動する | 未実装 |
-| BTN-153 | Settings | Key Split | Key Split設定画面へ移動する | 未実装 |
-| BTN-154 | Settings | Set CC/PC | CC/PC設定画面へ移動する | 未実装 |
-| BTN-155 | Key Split | OK | Key Split設定を確定する | 未実装 |
-| BTN-156 | Key Split | Cancel | 変更を破棄してSettingsへ戻る | 未実装 |
-| BTN-157 | Set CC/PC | OK | CC/PC設定を確定してSettingsへ戻る | 未実装 |
-| BTN-158 | Set CC/PC | Cancel | CC/PC設定の変更を破棄してSettingsへ戻る | 未実装 |
+| BTN-153 | Settings | Key Split | Key Split設定画面へ移動する | 実装済み |
+| BTN-154 | Settings | Set CC/PC | CC/PC設定画面へ移動する | 実装済み |
+| BTN-155 | Key Split | OK | Key Split設定を確定する | 遷移のみ実装 |
+| BTN-156 | Key Split | Cancel | 変更を破棄してSettingsへ戻る | 遷移のみ実装 |
+| BTN-157 | Set CC/PC | OK | CC/PC設定を確定してSettingsへ戻る | 遷移のみ実装 |
+| BTN-158 | Set CC/PC | Cancel | CC/PC設定の変更を破棄してSettingsへ戻る | 遷移のみ実装 |
 | BTN-159 | MIDI LOG | Prev. | SCR-001へ戻る | 実装済み |
-| BTN-160 | Settings | Prev. | SEQTRAK Controllerへ戻る | 未実装 |
+| BTN-160 | Settings | Prev. | SEQTRAK Controllerへ戻る | 実装済み |
 
 ## Penpot Prototypeリンク
 

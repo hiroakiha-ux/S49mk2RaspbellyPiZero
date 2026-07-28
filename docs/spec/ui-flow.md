@@ -38,7 +38,7 @@ flowchart TD
     AUDITION --> LIST
     DRUMSET -->|"BTN-130～137<br/>Type／パート選択"| DRUMSET
 
-    HOME -->|"BTN-003 Setting"| SETTINGS["SCR-009<br/>Settings<br/>設計済み"]
+    HOME -->|"BTN-003 Setting"| SETTINGS["SCR-009<br/>Settings<br/>画面表示実装済み"]
     SETTINGS -->|"BTN-150 S49MK2"| S49["S49 MK2設定<br/>画面仕様は未定義"]
     SETTINGS -->|"BTN-151 SERTRAK"| SEQ["SEQTRAK設定<br/>画面仕様は未定義"]
     SETTINGS -->|"BTN-152 Controller"| CTRL["Controller設定<br/>画面仕様は未定義"]
@@ -85,6 +85,12 @@ stateDiagram-v2
 
     ControllerHome --> MidiLog: Play／MIDIスルーON
     MidiLog --> ControllerHome: Prev.
+    ControllerHome --> Settings: Setting
+    Settings --> ControllerHome: Prev.
+    Settings --> KeySplit: Key Split
+    Settings --> SetCcPc: Set CC/PC
+    KeySplit --> Settings: OK／Cancel
+    SetCcPc --> Settings: OK／Cancel
     ControllerHome --> TrackSelect: Sound Select
     TrackSelect --> TrackSelect: ジョグ回転／トラック選択
     TrackSelect --> TrackDetail: DXまたはSAMPLERでジョグ押下
@@ -96,8 +102,8 @@ stateDiagram-v2
 ```
 
 現状のC++で画面IDとして実装されているのは`ControllerHome`、
-`SoundSelect`、`MidiLog`です。カテゴリ、Sound List、DrumSet、Settings、
-Key Split、Set CC/PCへの遷移は未実装です。
+`SoundSelect`、`Settings`、`KeySplit`、`SetCcPc`、`MidiLog`です。
+カテゴリ、Sound List、DrumSetへの遷移は未実装です。
 
 ## Penpot Prototype遷移
 
@@ -123,7 +129,7 @@ flowchart LR
 
     HOME -->|"✅ Play"| LOG
     HOME -->|"✅ Sound Select"| VAR
-    HOME -->|"⬜ Setting"| SETTINGS
+    HOME -->|"✅ Setting"| SETTINGS
     VAR -->|"⬜ Next"| DS
     VAR -->|"⬜ Next"| DSC
     VAR -->|"⬜ Next"| SSC
@@ -139,17 +145,17 @@ flowchart LR
     SLIST -->|"⬜ Next"| SSC
     SLIST -->|"⬜ Next"| DxSC
     SLIST -->|"⬜ Next"| SaSC
-    SETTINGS -->|"⬜ Prev."| HOME
-    SETTINGS -->|"⬜ Key Split"| SPLIT
-    SETTINGS -->|"⬜ Set CC / PC"| CCPC
-    SPLIT -->|"⬜ OK"| SETTINGS
-    SPLIT -->|"⬜ Cancel"| SETTINGS
-    CCPC -->|"⬜ OK"| SETTINGS
-    CCPC -->|"⬜ Cancel"| SETTINGS
+    SETTINGS -->|"✅ Prev."| HOME
+    SETTINGS -->|"✅ Key Split"| SPLIT
+    SETTINGS -->|"✅ Set CC / PC"| CCPC
+    SPLIT -->|"✅ OK"| SETTINGS
+    SPLIT -->|"✅ Cancel"| SETTINGS
+    CCPC -->|"✅ OK"| SETTINGS
+    CCPC -->|"✅ Cancel"| SETTINGS
     LOG -->|"✅ Prev."| HOME
 
-    linkStyle 0,1,25 stroke:#2e7d32,stroke-width:3px
-    linkStyle 2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24 stroke:#808080,stroke-width:2px
+    linkStyle 0,1,2,18,19,20,21,22,23,24,25 stroke:#2e7d32,stroke-width:3px
+    linkStyle 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 stroke:#808080,stroke-width:2px
     classDef implemented fill:#d7f5df,stroke:#2e7d32,stroke-width:3px,color:#1b5e20
     class LOG implemented
 ```

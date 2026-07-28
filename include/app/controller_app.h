@@ -55,13 +55,23 @@ class ControllerApp {
   void Stop();
 
  private:
-  enum class ScreenId { kControllerHome, kSoundSelect, kMidiLog };
+  enum class ScreenId {
+    kControllerHome,
+    kSoundSelect,
+    kSettings,
+    kKeySplit,
+    kSetCcPc,
+    kMidiLog
+  };
   enum class ActionId { kPlay, kSoundSelect, kSetting };
   enum class LcdUiMode { kTrackSelect, kTrackTypeSelect, kTrackDetail };
 
   void DrawStartupScreens();
   void DrawLeftLcdUi();
   void DrawControllerHome(mk2::LcdCanvas& canvas);
+  void DrawSettings(mk2::LcdCanvas& canvas);
+  void DrawKeySplit(mk2::LcdCanvas& canvas);
+  void DrawSetCcPc(mk2::LcdCanvas& canvas);
   void DrawMidiLog(mk2::LcdCanvas& canvas);
   void PollHidLoop();
   void HandleHidReport(const std::vector<uint8_t>& report);
@@ -86,6 +96,8 @@ class ControllerApp {
   std::vector<uint8_t> previous_hid_report_;
   ScreenId current_screen_ = ScreenId::kControllerHome;
   int selected_home_button_ = 0;
+  int selected_settings_item_ = 0;
+  int selected_dialog_action_ = 0;
   LcdUiMode lcd_ui_mode_ = LcdUiMode::kTrackSelect;
   int selected_track_ = 0;
   int selected_track_type_ = 0;
