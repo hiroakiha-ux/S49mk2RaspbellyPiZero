@@ -10,8 +10,11 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "display/lcd_canvas.h"
@@ -52,13 +55,22 @@ class ControllerApp {
   void Stop();
 
  private:
+  enum class ScreenId { kControllerHome, kSoundSelect, kMidiLog };
+  enum class ActionId { kPlay, kSoundSelect, kSetting };
   enum class LcdUiMode { kTrackSelect, kTrackTypeSelect, kTrackDetail };
 
   void DrawStartupScreens();
   void DrawLeftLcdUi();
+  void DrawControllerHome(mk2::LcdCanvas& canvas);
+  void DrawMidiLog(mk2::LcdCanvas& canvas);
   void PollHidLoop();
   void HandleHidReport(const std::vector<uint8_t>& report);
   void OnMk2MidiMessage(const mk2::MidiMessage& message);
+  void ApplyPendingUiAction();
+  void ActivateAction(ActionId action);
+  void ReturnToControllerHome();
+  void AppendMidiLog(const mk2::MidiMessage& message);
+  void ApplyPendingMidiLogRedraw();
   void ApplyPendingMidiControls();
   void MoveJogSelection(int delta);
   void ConfirmJogSelection();
@@ -72,6 +84,8 @@ class ControllerApp {
   std::unique_ptr<mk2seq::StepSequencer> sequencer_;
 
   std::vector<uint8_t> previous_hid_report_;
+  ScreenId current_screen_ = ScreenId::kControllerHome;
+  int selected_home_button_ = 0;
   LcdUiMode lcd_ui_mode_ = LcdUiMode::kTrackSelect;
   int selected_track_ = 0;
   int selected_track_type_ = 0;
@@ -85,6 +99,10 @@ class ControllerApp {
   std::chrono::steady_clock::time_point last_knob2_touch_{};
   std::array<std::atomic<int>, 2> pending_knob_cc_{
       std::atomic<int>{-1}, std::atomic<int>{-1}};
+  std::atomic<int> pending_ui_action_{-1};
+  std::mutex midi_log_mutex_;
+  std::deque<std::string> midi_log_lines_;
+  std::atomic<bool> midi_log_redraw_pending_{false};
   int last_pan_midi_value_ = -1;
   bool pan_rebased_after_reset_ = false;
   std::atomic<bool> running_{false};

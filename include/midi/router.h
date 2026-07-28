@@ -80,6 +80,16 @@ class Mk2SeqtrakRouter {
   void Stop();
   bool IsRunning() const { return running_.load(); }
 
+  // Controls the raw MK2 -> SEQTRAK performance-MIDI pass-through. The
+  // observer callback remains active while forwarding is disabled, allowing
+  // the app to use MK2 MIDI CC messages as UI button events.
+  void SetMk2ToSeqtrakForwardingEnabled(bool enabled) {
+    mk2_to_seqtrak_forwarding_enabled_.store(enabled);
+  }
+  bool IsMk2ToSeqtrakForwardingEnabled() const {
+    return mk2_to_seqtrak_forwarding_enabled_.load();
+  }
+
   // Thread-safe injection, independent of the raw relay pumps.
   bool SendToSeqtrak(const std::vector<uint8_t>& bytes);
   bool SendToMk2(const std::vector<uint8_t>& bytes);
@@ -103,6 +113,7 @@ class Mk2SeqtrakRouter {
   bool dry_run_;
 
   std::atomic<bool> running_{false};
+  std::atomic<bool> mk2_to_seqtrak_forwarding_enabled_{false};
   std::thread mk2_to_seqtrak_thread_;
   std::thread seqtrak_to_mk2_thread_;
 

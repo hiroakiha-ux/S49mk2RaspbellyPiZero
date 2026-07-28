@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "mk2_protocol.h"
 #include "util/hex_dump.h"
 
 namespace mk2 {
@@ -201,10 +202,25 @@ void Mk2SeqtrakRouter::PumpLoop(AlsaRawMidiPort* from, AlsaRawMidiPort* to,
     auto bytes = from->Read(kPumpPollTimeoutMs);
     if (!bytes.has_value()) continue;
 
-    WriteOrLog(to, to_label, to_write_mutex, *bytes);
+    const MidiMessage message = DecodeMidiMessage(*bytes);
+    const bool from_mk2 = from == mk2_port_;
+    const bool is_ui_button =
+        from_mk2 && message.kind == MidiMessageKind::kControlChange &&
+        message.data1 >= kObservedFunctionButtonCcBase &&
+        message.data1 <
+            kObservedFunctionButtonCcBase +
+                static_cast<int>(kLcdFunctionButtonLedIds.size());
+    const bool forwarding_enabled =
+        !from_mk2 || mk2_to_seqtrak_forwarding_enabled_.load();
+
+    // Function-row CCs are application UI events, not performance MIDI.
+    // Other MK2 MIDI is forwarded only after the Play action enables it.
+    if (forwarding_enabled && !is_ui_button) {
+      WriteOrLog(to, to_label, to_write_mutex, *bytes);
+    }
 
     if (*callback) {
-      (*callback)(DecodeMidiMessage(*bytes));
+      (*callback)(message);
     }
   }
 }

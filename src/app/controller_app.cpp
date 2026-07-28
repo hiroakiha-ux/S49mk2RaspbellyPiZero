@@ -28,6 +28,19 @@ constexpr int kPanMin = -50;
 constexpr int kPanMax = 50;
 constexpr auto kKnobDoubleTouchMin = std::chrono::milliseconds(80);
 constexpr auto kKnobDoubleTouchMax = std::chrono::milliseconds(500);
+constexpr size_t kMidiLogCapacity = 11;
+
+struct HomeButtonSpec {
+  const char* label;
+  int x;
+  int width;
+};
+
+constexpr HomeButtonSpec kHomeButtons[] = {
+    {"Play", 12, 144},
+    {"Sound Select", 168, 144},
+    {"Setting", 324, 144},
+};
 
 int WrappedDelta(int previous, int current, int modulo) {
   int delta = current - previous;
@@ -64,6 +77,50 @@ bool EventActive(const std::vector<uint8_t>& report,
     return (value & event.value) == event.value;
   }
   return value == event.value;
+}
+
+std::string MidiNoteName(int note) {
+  constexpr const char* kNames[] = {
+      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+  if (note < 0 || note > 127) return std::to_string(note);
+  return std::string(kNames[note % 12]) + std::to_string(note / 12 - 2);
+}
+
+std::string FormatMidiLogLine(const mk2::MidiMessage& message) {
+  char line[64];
+  switch (message.kind) {
+    case mk2::MidiMessageKind::kNoteOn:
+      std::snprintf(line, sizeof(line), "%02d  NOTE ON   %-3s V:%03d",
+                    message.channel, MidiNoteName(message.data1).c_str(),
+                    message.data2);
+      break;
+    case mk2::MidiMessageKind::kNoteOff:
+      std::snprintf(line, sizeof(line), "%02d  NOTE OFF  %-3s V:%03d",
+                    message.channel, MidiNoteName(message.data1).c_str(),
+                    message.data2);
+      break;
+    case mk2::MidiMessageKind::kControlChange:
+      std::snprintf(line, sizeof(line), "%02d  CC %03d    V:%03d",
+                    message.channel, message.data1, message.data2);
+      break;
+    case mk2::MidiMessageKind::kProgramChange:
+      std::snprintf(line, sizeof(line), "%02d  PC %03d", message.channel,
+                    message.data1);
+      break;
+    case mk2::MidiMessageKind::kPitchBend:
+      std::snprintf(line, sizeof(line), "%02d  PITCH     V:%05d",
+                    message.channel, message.data1);
+      break;
+    case mk2::MidiMessageKind::kSystemExclusive:
+      std::snprintf(line, sizeof(line), "--  SYSEX     %zu bytes",
+                    message.raw.size());
+      break;
+    default:
+      std::snprintf(line, sizeof(line), "--  OTHER     %zu bytes",
+                    message.raw.size());
+      break;
+  }
+  return std::string(line);
 }
 
 }  // namespace
@@ -165,6 +222,19 @@ void ControllerApp::DrawLeftLcdUi() {
   mk2::LcdCanvas left;
   left.Clear(0, 0, 0);
 
+  if (current_screen_ == ScreenId::kControllerHome) {
+    DrawControllerHome(left);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    return;
+  }
+  if (current_screen_ == ScreenId::kMidiLog) {
+    DrawMidiLog(left);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    return;
+  }
+
   constexpr int kGap = 6;
   constexpr int kButtonHeight = 32;
   constexpr int kPaddingX = 12;
@@ -251,6 +321,89 @@ void ControllerApp::DrawLeftLcdUi() {
                          mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
 }
 
+void ControllerApp::DrawControllerHome(mk2::LcdCanvas& canvas) {
+  const auto draw_centered = [&canvas](int y, const std::string& text,
+                                       uint8_t r, uint8_t g, uint8_t b) {
+    const int width = mk2::LcdCanvas::MeasureUtf8Width(text, 1);
+    DrawShinonomeText(canvas, (mk2::kLcdWidth - width) / 2, y, text, r, g, b);
+  };
+
+  draw_centered(36, "SEQTRAK controller", 244, 247, 250);
+  draw_centered(68, "Using KOMPLETE KONTROL S49 MK2", 184, 197, 206);
+
+  const bool s49_connected =
+      hid_device_ != nullptr && hid_device_->IsOpen() &&
+      mk2_midi_port_ != nullptr;
+  const bool seqtrak_connected = seqtrak_midi_port_ != nullptr;
+  std::string status = "Status  S49:";
+  status += s49_connected ? "OK" : "--";
+  status += "  SEQTRAK:";
+  status += seqtrak_connected ? "OK" : "--";
+  draw_centered(104, status, s49_connected && seqtrak_connected ? 72 : 242,
+                s49_connected && seqtrak_connected ? 213 : 184,
+                s49_connected && seqtrak_connected ? 151 : 75);
+
+  constexpr int kButtonY = 144;
+  constexpr int kButtonHeight = 66;
+  for (int i = 0; i < 3; ++i) {
+    const bool selected = selected_home_button_ == i;
+    const auto& spec = kHomeButtons[i];
+    FillRoundedRect(canvas, spec.x, kButtonY, spec.width, kButtonHeight, 4,
+                    selected ? 0 : 32, selected ? 215 : 42,
+                    selected ? 255 : 51);
+    canvas.DrawRect(spec.x, kButtonY, spec.width, kButtonHeight,
+                    selected ? 184 : 82, selected ? 245 : 97,
+                    selected ? 255 : 109);
+    const int label_width =
+        mk2::LcdCanvas::MeasureUtf8Width(spec.label, 1);
+    DrawShinonomeText(canvas, spec.x + (spec.width - label_width) / 2,
+                      kButtonY + 25, spec.label, selected ? 6 : 242,
+                      selected ? 16 : 247, selected ? 20 : 249);
+  }
+
+  const bool playing =
+      router_ != nullptr && router_->IsMk2ToSeqtrakForwardingEnabled();
+  draw_centered(232, playing ? "MIDI thru: ON" : "MIDI thru: OFF",
+                playing ? 72 : 130, playing ? 213 : 147,
+                playing ? 151 : 160);
+}
+
+void ControllerApp::DrawMidiLog(mk2::LcdCanvas& canvas) {
+  constexpr int kHeaderHeight = 28;
+  canvas.FillRect(0, 0, mk2::kLcdWidth, kHeaderHeight, 27, 32, 40);
+  canvas.DrawRect(0, 0, mk2::kLcdWidth, kHeaderHeight, 82, 97, 109);
+
+  FillRoundedRect(canvas, 8, 4, 64, 20, 3, 0, 215, 255);
+  DrawShinonomeText(canvas, 20, 6, "Prev.", 6, 16, 20);
+
+  const std::string title = "MIDI LOG";
+  const int title_width = mk2::LcdCanvas::MeasureUtf8Width(title, 1);
+  DrawShinonomeText(canvas, (mk2::kLcdWidth - title_width) / 2, 6, title,
+                    244, 247, 250);
+
+  DrawShinonomeText(canvas, 16, 42, "CH", 170, 179, 192);
+  DrawShinonomeText(canvas, 72, 42, "TYPE", 170, 179, 192);
+  DrawShinonomeText(canvas, 192, 42, "DATA", 170, 179, 192);
+  canvas.DrawRect(8, 34, 448, 218, 82, 97, 109);
+  canvas.FillRect(456, 34, 8, 218, 37, 43, 52);
+  FillRoundedRect(canvas, 457, 36, 6, 54, 3, 130, 147, 160);
+
+  std::vector<std::string> lines;
+  {
+    std::lock_guard<std::mutex> lock(midi_log_mutex_);
+    lines.assign(midi_log_lines_.begin(), midi_log_lines_.end());
+  }
+  if (lines.empty()) {
+    DrawShinonomeText(canvas, 16, 76, "Waiting for MIDI messages...",
+                      130, 147, 160);
+    return;
+  }
+  for (size_t i = 0; i < lines.size(); ++i) {
+    DrawShinonomeText(canvas, 16, 66 + static_cast<int>(i) * 16, lines[i],
+                      244, 247, 250);
+  }
+}
+
 void ControllerApp::Run() {
   running_.store(true);
   DrawStartupScreens();
@@ -273,22 +426,111 @@ void ControllerApp::PollHidLoop() {
       HandleHidReport(*report);
       previous_hid_report_ = *report;
     }
+    ApplyPendingUiAction();
+    ApplyPendingMidiLogRedraw();
     ApplyPendingMidiControls();
   }
 }
 
 void ControllerApp::OnMk2MidiMessage(const mk2::MidiMessage& message) {
-  if (message.kind != mk2::MidiMessageKind::kControlChange) return;
-  const int knob = message.data1 - mk2::kDefaultKnobCcBase;
-  if (knob < 0 || knob >= 2) return;
+  if (message.kind == mk2::MidiMessageKind::kControlChange) {
+    const int function_button =
+        message.data1 - mk2::kObservedFunctionButtonCcBase;
+    if (function_button >= 0 &&
+        function_button <
+            static_cast<int>(mk2::kLcdFunctionButtonLedIds.size())) {
+      if (message.data2 > 0 && function_button < 3) {
+        pending_ui_action_.store(function_button);
+      }
+      return;
+    }
+  }
 
-  std::fprintf(stderr, "controller_app: MIDI Knob%d CC=0x%02x value=%d\n",
-               knob + 1, message.data1, message.data2);
-  pending_knob_cc_[knob].store(message.data2);
+  if (router_ && router_->IsMk2ToSeqtrakForwardingEnabled()) {
+    AppendMidiLog(message);
+  }
+
+  if (message.kind == mk2::MidiMessageKind::kControlChange) {
+    const int knob = message.data1 - mk2::kDefaultKnobCcBase;
+    if (knob >= 0 && knob < 2) {
+      std::fprintf(stderr,
+                   "controller_app: MIDI Knob%d CC=0x%02x value=%d\n",
+                   knob + 1, message.data1, message.data2);
+      pending_knob_cc_[knob].store(message.data2);
+    }
+  }
+}
+
+void ControllerApp::ApplyPendingUiAction() {
+  const int action = pending_ui_action_.exchange(-1);
+  if (action < 0 || action > static_cast<int>(ActionId::kSetting)) return;
+  if (current_screen_ == ScreenId::kMidiLog &&
+      action == static_cast<int>(ActionId::kPlay)) {
+    ReturnToControllerHome();
+    DrawLeftLcdUi();
+    return;
+  }
+  ActivateAction(static_cast<ActionId>(action));
+}
+
+void ControllerApp::ActivateAction(ActionId action) {
+  switch (action) {
+    case ActionId::kPlay:
+      if (router_) {
+        router_->SetMk2ToSeqtrakForwardingEnabled(true);
+      }
+      {
+        std::lock_guard<std::mutex> lock(midi_log_mutex_);
+        midi_log_lines_.clear();
+      }
+      current_screen_ = ScreenId::kMidiLog;
+      selected_home_button_ = 0;
+      std::fprintf(stderr,
+                   "controller_app: Play: MIDI thru enabled, screen -> MIDI "
+                   "LOG\n");
+      break;
+    case ActionId::kSoundSelect:
+      current_screen_ = ScreenId::kSoundSelect;
+      lcd_ui_mode_ = LcdUiMode::kTrackSelect;
+      std::fprintf(stderr, "controller_app: screen -> Sound Select\n");
+      break;
+    case ActionId::kSetting:
+      current_screen_ = ScreenId::kControllerHome;
+      selected_home_button_ = 2;
+      std::fprintf(stderr,
+                   "controller_app: Setting action is reserved for a future "
+                   "screen\n");
+      break;
+  }
+  DrawLeftLcdUi();
+}
+
+void ControllerApp::ReturnToControllerHome() {
+  current_screen_ = ScreenId::kControllerHome;
+  selected_home_button_ = 0;
+  std::fprintf(stderr, "controller_app: screen -> Controller Home\n");
+}
+
+void ControllerApp::AppendMidiLog(const mk2::MidiMessage& message) {
+  const std::string line = FormatMidiLogLine(message);
+  {
+    std::lock_guard<std::mutex> lock(midi_log_mutex_);
+    if (midi_log_lines_.size() == kMidiLogCapacity) {
+      midi_log_lines_.pop_front();
+    }
+    midi_log_lines_.push_back(line);
+  }
+  midi_log_redraw_pending_.store(true);
+}
+
+void ControllerApp::ApplyPendingMidiLogRedraw() {
+  if (!midi_log_redraw_pending_.exchange(false)) return;
+  if (current_screen_ == ScreenId::kMidiLog) DrawLeftLcdUi();
 }
 
 void ControllerApp::ApplyPendingMidiControls() {
-  if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
+  if (current_screen_ != ScreenId::kSoundSelect ||
+      lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
     pending_knob_cc_[0].store(-1);
     pending_knob_cc_[1].store(-1);
     return;
@@ -412,8 +654,8 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
     if (printed_prefix) std::fprintf(stderr, "\n");
   }
 
-  // Function buttons 1..8 -> CC22..29 (press = value 127, per SEQTRAK CC
-  // table's expectation of "value 127 for the default toggle/action test").
+  // The first three Function buttons are global UI actions. The remaining
+  // buttons are sent to SEQTRAK only after Play has enabled MIDI thru.
   for (size_t i = 0; i < mk2::kFunctionButtonMasks.size(); ++i) {
     uint8_t mask = mk2::kFunctionButtonMasks[i];
     bool was_down = !previous_hid_report_.empty() &&
@@ -425,9 +667,15 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
         static_cast<size_t>(mk2::kInputByteFunctionButtons) < report.size() &&
         (report[mk2::kInputByteFunctionButtons] & mask);
     if (is_down && !was_down) {
-      uint8_t cc = static_cast<uint8_t>(
-          mk2::kDefaultFunctionButtonCcBase + static_cast<int>(i));
-      if (router_) {
+      if (current_screen_ == ScreenId::kMidiLog && i == 0) {
+        ReturnToControllerHome();
+        DrawLeftLcdUi();
+      } else if (i < std::size(kHomeButtons)) {
+        ActivateAction(static_cast<ActionId>(i));
+      } else if (router_ &&
+                 router_->IsMk2ToSeqtrakForwardingEnabled()) {
+        uint8_t cc = static_cast<uint8_t>(
+            mk2::kDefaultFunctionButtonCcBase + static_cast<int>(i));
         router_->SendToSeqtrak(
             mk2::BuildControlChange(kControlChannel, cc, 127));
       }
@@ -533,7 +781,8 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
       // In the track settings screens, LCD knob 1 edits Volume (0..100) and
       // knob 2 edits Pan (-50..50). Positive hardware deltas are clockwise;
       // negative deltas are counter-clockwise.
-      if (lcd_ui_mode_ != LcdUiMode::kTrackSelect && physical_knob < 2 &&
+      if (current_screen_ == ScreenId::kSoundSelect &&
+          lcd_ui_mode_ != LcdUiMode::kTrackSelect && physical_knob < 2 &&
           (knob_is_being_operated || last_touched_knob_ >= 0)) {
         int step = std::clamp(delta, -10, 10);
         if (physical_knob == 0) {
@@ -576,6 +825,13 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
 }
 
 void ControllerApp::MoveJogSelection(int delta) {
+  if (current_screen_ == ScreenId::kControllerHome) {
+    constexpr int count = static_cast<int>(std::size(kHomeButtons));
+    selected_home_button_ =
+        (selected_home_button_ + delta % count + count) % count;
+    return;
+  }
+
   if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
     int count = static_cast<int>(seqtrak::kTrackCount);
     selected_track_ = (selected_track_ + delta % count + count) % count;
@@ -587,6 +843,15 @@ void ControllerApp::MoveJogSelection(int delta) {
 }
 
 void ControllerApp::ConfirmJogSelection() {
+  if (current_screen_ == ScreenId::kControllerHome) {
+    ActivateAction(static_cast<ActionId>(selected_home_button_));
+    return;
+  }
+  if (current_screen_ == ScreenId::kMidiLog) {
+    ReturnToControllerHome();
+    return;
+  }
+
   if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
     lcd_ui_mode_ = (selected_track_ == 9 || selected_track_ == 10)
                        ? LcdUiMode::kTrackDetail
