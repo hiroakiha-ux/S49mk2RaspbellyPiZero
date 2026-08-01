@@ -9,6 +9,7 @@
 - 点線: Penpot Prototypeだけに設定されている遷移
 - 「設計済み」: Penpotに画面はあるが、C++では未実装
 - 「実装完了」: 画面、操作、実機への設定反映まで実装・確認済み
+- 「現行仕様完了」: 現在対象の機能は完了し、未解析機能は将来拡張のTODO
 - 「未定義」: ボタンは定義されているが、遷移先画面の仕様がない
 
 ## 仕様上の画面・ボタンフロー
@@ -44,7 +45,7 @@ flowchart TD
     SETTINGS -->|"BTN-151 SERTRAK"| SEQ["SEQTRAK設定<br/>画面仕様は未定義"]
     SETTINGS -->|"BTN-152 Controller"| CTRL["Controller設定<br/>画面仕様は未定義"]
     SETTINGS -->|"BTN-153 Key Split"| SPLIT["SCR-010<br/>Key Split<br/>実装完了"]
-    SETTINGS -->|"BTN-154 Set CC/PC"| CCPC["SCR-011<br/>Set CC/PC<br/>設計済み"]
+    SETTINGS -->|"BTN-154 Set CC"| CCPC["SCR-011<br/>Set CC<br/>現行仕様完了"]
     SETTINGS -->|"BTN-160 Prev."| HOME
     SPLIT -->|"BTN-155 OK<br/>確定"| SETTINGS
     SPLIT -->|"BTN-156 Cancel<br/>破棄"| SETTINGS
@@ -89,7 +90,7 @@ stateDiagram-v2
     ControllerHome --> Settings: Setting
     Settings --> ControllerHome: Prev.
     Settings --> KeySplit: Key Split
-    Settings --> SetCcPc: Set CC/PC
+    Settings --> SetCcPc: Set CC
     KeySplit --> Settings: OK／Cancel
     SetCcPc --> Settings: OK／Cancel
     ControllerHome --> TrackSelect: Sound Select
@@ -111,6 +112,7 @@ stateDiagram-v2
 Penpotで確認できたClick → Navigate toのみを抜き出した図です。
 
 - 緑・`✅`: C++で遷移を実装・検証済み
+- 橙・`◆`: 現行仕様完了（将来拡張のTODOあり）
 - 灰・`⬜`: 未実装
 
 ```mermaid
@@ -119,7 +121,7 @@ flowchart LR
     VAR["Variation 01"]
     SETTINGS["Settings"]
     SPLIT["✅ Key Split"]
-    CCPC["Set CC / PC"]
+    CCPC["◆ Set CC"]
     LOG["✅ MIDI LOG"]
     DS["Drum Set"]
     DSC["Drum Sound Category"]
@@ -148,17 +150,20 @@ flowchart LR
     SLIST -->|"⬜ Next"| SaSC
     SETTINGS -->|"✅ Prev."| HOME
     SETTINGS -->|"✅ Key Split"| SPLIT
-    SETTINGS -->|"✅ Set CC / PC"| CCPC
+    SETTINGS -->|"◆ Set CC"| CCPC
     SPLIT -->|"✅ OK"| SETTINGS
     SPLIT -->|"✅ Cancel"| SETTINGS
-    CCPC -->|"✅ OK"| SETTINGS
-    CCPC -->|"✅ Cancel"| SETTINGS
+    CCPC -->|"◆ OK"| SETTINGS
+    CCPC -->|"◆ Cancel"| SETTINGS
     LOG -->|"✅ Prev."| HOME
 
-    linkStyle 0,1,2,18,19,20,21,22,23,24,25 stroke:#2e7d32,stroke-width:3px
+    linkStyle 0,1,2,18,19,21,22,25 stroke:#2e7d32,stroke-width:3px
+    linkStyle 20,23,24 stroke:#ef6c00,stroke-width:3px
     linkStyle 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 stroke:#808080,stroke-width:2px
     classDef implemented fill:#d7f5df,stroke:#2e7d32,stroke-width:3px,color:#1b5e20
+    classDef currentComplete fill:#fff3e0,stroke:#ef6c00,stroke-width:3px,color:#bf360c
     class LOG,SPLIT implemented
+    class CCPC currentComplete
 ```
 
 Settings内の図示されていないその他のボタンには、Penpot Prototypeリンクは

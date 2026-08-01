@@ -4,3 +4,5 @@ compile_commands.json
 *.a
 .DS_Store
 資料/
+s49mk2_control_assignments.conf
+s49mk2_control_assignments.conf.tmp

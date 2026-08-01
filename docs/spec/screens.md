@@ -10,7 +10,7 @@
    ├─ Sound Select → S49 MK2 LCD — Variation 01 — Shinonome12
    └─ Setting → Settings
       └─ Key Split → Key Split（実装完了）
-      └─ Set CC/PC → Set CC/PC（将来実装）
+      └─ Set CC → Set CC（一部実装）
 ```
 
 ## SCR-001: SEQTRAK Controller
@@ -168,7 +168,7 @@
 
 - S49MK2
 - Key Split
-- Set CC/PC
+- Set CC
 - SERTRAK
 - Controller
 
@@ -246,56 +246,78 @@
 - 編集中の変更を破棄する
 - Settings画面へ戻る
 
-## SCR-011: Set CC/PC
+## SCR-011: Set CC
 
-- 状態: 一部実装（画面表示とOK／Cancel遷移）
+- 状態: 現行仕様完了（確認済みコントロールのCC設定は完了。
+  未解析の操作子／メッセージ種別は将来拡張のTODO）
 - サイズ: 480 × 272 px
-- レイアウト: ヘッダー28 px、2列、行ピッチ22 px
-- 用途: S49 MK2のCC/PC割り当てを設定する
-- ヘッダー左: 現在のPage番号
-- ヘッダー右: OK、Cancelボタン
-- デフォルトPage: 1
-- デフォルトType: CC
-- 各行の右端: 3桁の番号入力欄
+- レイアウト: 左右LCD各480 × 272 px、ヘッダー28 px、行ピッチ22 px
+- 用途: S49 MK2の確認済みCC割り当てを設定する
+- 左LCD: Knob 1～8、Mod Wheel
+- 右LCD: Button 1～8
+- ヘッダー: OK、Cancelボタン
+- Type: CC固定（青）
+- 各行: Control名、Type、3桁の値入力欄
 - 番号入力範囲: 000～127
-- 番号のデフォルト値: 000
+- 番号のデフォルト値: CC 000
+- 操作方法: ジョグの上下クリックで行、左右クリックで左右LCDを移動し、
+  ジョグ回転で選択中のCC番号を変更する
 
 ### 左列
 
 | 操作子 | 選択可能Type |
 |---|---|
-| Knob 1～8 | CC、PC |
-| Pedal A | CC、PC |
-| Pedal B | CC、PC |
+| Knob 1～8 | CC |
+| Mod Wheel | CC |
 
 ### 右列
 
 | 操作子 | 選択可能Type |
 |---|---|
-| Button 1～8 | CC、PC、Note |
-| Touch Strip | CC |
+| Button 1～8 | CC |
+
+### 過去の解析・テスト状況
+
+- Knob 1～8／Button 1～8: HID `0xA1`のCC割り当てとMIDI出力を確認済み
+- Mod Wheel: HID `0xA2`によるCC割り当てとMIDI出力を確認済み
+- Prog／Note: HID形式が未確認のため、選択・保存・送信機能から除外
+
+### TODO: 実機確認後に追加する操作子
+
+- Program Change／Note: Button／KnobへのHID割り当て形式を解析・実機確認後、
+  選択肢と保存・送信処理を追加する
+- Touch Strip: CCイベントを観測済みだが、タイミングと割り当てを再検証する
+- Pedal A／B: HID `0xA3`のレポート形式のみ判明。ペダル実機では未検証
+- 未確認操作子は画面へ表示せず、ブリッジ変換による代替実装も行わない
+
+### TODO: パネルキーのTransport機能
+
+- S49 MK2のPlay／Stopキー押下を検出し、SEQTRAKへMIDI System Real-Timeを
+  直接送信する
+- Play: Start (`FA`)、Stop: Stop (`FC`)
+- 再開操作が必要な場合はContinue (`FB`)を使用する
+- 外部MIDIクロック同期時はTiming Clock (`F8`)を継続送信する
+- SEQTRAK側のMIDI Syncが`MIDI(Auto)`であることを前提条件とする
+- Start／Stop用のCCはSEQTRAKの受信仕様に存在しないため、Set CCの割り当て
+  対象には含めない
+- CCへのブリッジ変換ではなく、SEQTRAKが受信可能なTransportメッセージを
+  直接送信する独立機能として実装する
 
 ### 番号入力
 
-- TypeがCCの場合: CC番号を入力する
-- TypeがPCの場合: Program番号を入力する
-- TypeがNoteの場合: MIDI Note番号を入力する
-- Typeを切り替えても、各Typeの番号を個別に保持する
+- CC番号を000～127で入力する
 
 ### OK
 
-- Page 1～4とグローバル操作子の設定を確定する
+- 編集内容を`s49mk2_control_assignments.conf`へ保存し、次回起動／画面表示時に
+  復元する
+- Knob／ButtonをHID `0xA1`、Mod WheelをHID `0xA2`でS49 MK2へ反映する
 - 設定後はSettings画面へ戻る
 
 ### Cancel
 
 - 編集中の変更を破棄する
 - Settings画面へ戻る
-
-### Page
-
-- Knob 1～8とButton 1～8はPage 1～4ごとに設定する
-- Pedal A、Pedal B、Touch Stripはグローバル設定とする
 
 ## SCR-012: MIDI LOG
 

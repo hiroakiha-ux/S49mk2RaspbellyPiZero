@@ -65,6 +65,9 @@ class ControllerApp {
   };
   enum class ActionId { kPlay, kSoundSelect, kSetting };
   enum class LcdUiMode { kTrackSelect, kTrackTypeSelect, kTrackDetail };
+  struct ControlAssignment {
+    int cc = 0;
+  };
 
   struct KeySplitZone {
     int low_note = 24;    // Standard MIDI C1
@@ -84,7 +87,7 @@ class ControllerApp {
   void DrawControllerHome(mk2::LcdCanvas& canvas);
   void DrawSettings(mk2::LcdCanvas& canvas);
   void DrawKeySplit(mk2::LcdCanvas& canvas);
-  void DrawSetCcPc(mk2::LcdCanvas& canvas);
+  void DrawSetCcPc(mk2::LcdCanvas& canvas, bool right_screen);
   void DrawMidiLog(mk2::LcdCanvas& canvas);
   void PollHidLoop();
   void HandleHidReport(const std::vector<uint8_t>& report);
@@ -100,6 +103,14 @@ class ControllerApp {
   void MoveKeySplitRow(int delta);
   void MoveKeySplitColumn(int delta);
   void ChangeKeySplitValue(int delta);
+  void MoveSetCcPcRow(int delta);
+  void MoveSetCcPcColumn(int delta);
+  void ChangeSetCcPcValue(int delta);
+  bool ApplyControlAssignments(
+      const std::array<ControlAssignment, 17>& assignments);
+  bool LoadControlAssignments();
+  bool SaveControlAssignments(
+      const std::array<ControlAssignment, 17>& assignments);
   void NormalizeKeySplitRanges(KeySplitSettings& settings);
   void LoadDrumKeySplitPreset();
   void LoadDrumSetKeySplitPreset();
@@ -120,6 +131,12 @@ class ControllerApp {
   int selected_home_button_ = 0;
   int selected_settings_item_ = 0;
   int selected_dialog_action_ = 0;
+  std::array<ControlAssignment, 17> control_assignments_{};
+  std::array<ControlAssignment, 17> edited_control_assignments_{};
+  int selected_ccpc_row_ = -1;
+  int selected_ccpc_column_ = 0;
+  int selected_ccpc_action_ = 0;
+  std::string ccpc_status_;
   KeySplitSettings key_split_settings_{};
   KeySplitSettings edited_key_split_settings_{};
   // -1 is the header (OK/Cancel), 0 is Zones, 1..16 are Zone rows. Zone-row
@@ -147,6 +164,7 @@ class ControllerApp {
   std::atomic<bool> midi_log_redraw_pending_{false};
   int last_pan_midi_value_ = -1;
   bool pan_rebased_after_reset_ = false;
+  bool right_lcd_has_ui_ = false;
   std::atomic<bool> running_{false};
   bool dry_run_ = false;
 };

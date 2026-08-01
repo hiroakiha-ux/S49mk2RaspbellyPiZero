@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
 #include <string>
 
 #include "display/lcd_packet.h"
@@ -29,6 +30,8 @@ constexpr int kPanMax = 50;
 constexpr auto kKnobDoubleTouchMin = std::chrono::milliseconds(80);
 constexpr auto kKnobDoubleTouchMax = std::chrono::milliseconds(500);
 constexpr size_t kMidiLogCapacity = 11;
+constexpr const char* kControlAssignmentsPath =
+    "s49mk2_control_assignments.conf";
 constexpr int kKeySplitFieldsPerZone = 4;
 constexpr int kKeySplitLowestNote = 24;    // C1
 constexpr int kKeySplitHighestNote = 127;  // G9
@@ -179,6 +182,8 @@ std::string FormatMidiLogLine(const mk2::MidiMessage& message) {
 ControllerApp::~ControllerApp() { Stop(); }
 
 bool ControllerApp::Initialize() {
+  LoadControlAssignments();
+
   if (dry_run_) {
     std::fprintf(stderr,
                  "controller_app: --dry-run active, no writes will reach "
@@ -273,6 +278,15 @@ void ControllerApp::DrawLeftLcdUi() {
   mk2::LcdCanvas left;
   left.Clear(0, 0, 0);
 
+  if (current_screen_ != ScreenId::kSetCcPc && right_lcd_has_ui_) {
+    mk2::LcdCanvas blank_right;
+    blank_right.Clear(0, 0, 0);
+    SendOrPreviewLcdPacket(
+        lcd_device_.get(), dry_run_, "right",
+        mk2::BuildLcdPacket(mk2::kLcdScreenRight, blank_right));
+    right_lcd_has_ui_ = false;
+  }
+
   if (current_screen_ == ScreenId::kControllerHome) {
     DrawControllerHome(left);
     SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
@@ -298,9 +312,15 @@ void ControllerApp::DrawLeftLcdUi() {
     return;
   }
   if (current_screen_ == ScreenId::kSetCcPc) {
-    DrawSetCcPc(left);
+    mk2::LcdCanvas right;
+    right.Clear(0, 0, 0);
+    DrawSetCcPc(left, false);
+    DrawSetCcPc(right, true);
     SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
                            mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "right",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenRight, right));
+    right_lcd_has_ui_ = true;
     return;
   }
 
@@ -490,7 +510,7 @@ void ControllerApp::DrawSettings(mk2::LcdCanvas& canvas) {
                     244, 247, 250);
 
   constexpr const char* kLabels[] = {
-      "S49MK2", "Key Split", "Set CC/PC", "SERTRAK", "Controller"};
+      "S49MK2", "Key Split", "Set CC", "SERTRAK", "Controller"};
   constexpr int kButtonX[] = {12, 168, 324, 90, 246};
   constexpr int kButtonY[] = {50, 50, 50, 136, 136};
   constexpr int kButtonWidth = 144;
@@ -620,44 +640,67 @@ void ControllerApp::DrawKeySplit(mk2::LcdCanvas& canvas) {
   }
 }
 
-void ControllerApp::DrawSetCcPc(mk2::LcdCanvas& canvas) {
+void ControllerApp::DrawSetCcPc(mk2::LcdCanvas& canvas, bool right_screen) {
   canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
-  DrawShinonomeText(canvas, 12, 6, "Page 1", 244, 247, 250);
-  constexpr const char* kActions[] = {"OK", "Cancel"};
-  constexpr int kActionX[] = {340, 388};
-  constexpr int kActionWidth[] = {40, 76};
-  for (int i = 0; i < 2; ++i) {
-    const bool selected = selected_dialog_action_ == i;
-    FillRoundedRect(canvas, kActionX[i], 4, kActionWidth[i], 20, 3,
-                    selected ? 0 : 32, selected ? 215 : 42,
-                    selected ? 255 : 51);
-    DrawShinonomeText(canvas, kActionX[i] + 8, 6, kActions[i],
-                      selected ? 6 : 170, selected ? 16 : 179,
-                      selected ? 20 : 192);
+  DrawShinonomeText(canvas, 12, 6,
+                    right_screen ? "Buttons" : "Set CC",
+                    244, 247, 250);
+  if (!right_screen) {
+    constexpr const char* kActions[] = {"OK", "Cancel"};
+    constexpr int kActionX[] = {340, 388};
+    constexpr int kActionWidth[] = {40, 76};
+    for (int i = 0; i < 2; ++i) {
+      const bool selected = selected_ccpc_row_ == -1 &&
+                            selected_ccpc_action_ == i;
+      FillRoundedRect(canvas, kActionX[i], 4, kActionWidth[i], 20, 3,
+                      selected ? 0 : 32, selected ? 215 : 42,
+                      selected ? 255 : 51);
+      DrawShinonomeText(canvas, kActionX[i] + 8, 6, kActions[i],
+                        selected ? 6 : 170, selected ? 16 : 179,
+                        selected ? 20 : 192);
+    }
   }
 
-  DrawShinonomeText(canvas, 12, 38, "CONTROL       TYPE NUM", 170, 179, 192);
-  DrawShinonomeText(canvas, 252, 38, "CONTROL      TYPE NUM", 170, 179, 192);
-  for (int row = 0; row < 10; ++row) {
-    char left[48];
-    char right[48];
-    if (row < 8) {
-      std::snprintf(left, sizeof(left), "Knob %d       CC  000", row + 1);
-      std::snprintf(right, sizeof(right), "Button %d    CC  000", row + 1);
-    } else {
-      std::snprintf(left, sizeof(left), "Pedal %c      CC  000",
-                    row == 8 ? 'A' : 'B');
-      if (row == 8) {
-        std::snprintf(right, sizeof(right), "Touch Strip CC  000");
-      } else {
-        right[0] = '\0';
-      }
-    }
-    const int y = 58 + row * 20;
-    DrawShinonomeText(canvas, 12, y, left, 244, 247, 250);
-    if (right[0] != '\0') {
-      DrawShinonomeText(canvas, 252, y, right, 244, 247, 250);
-    }
+  DrawShinonomeText(canvas, 12, 36, "CONTROL", 170, 179, 192);
+  DrawShinonomeText(canvas, 244, 36, "TYPE", 170, 179, 192);
+  DrawShinonomeText(canvas, 350, 36, "VALUE", 170, 179, 192);
+
+  constexpr const char* kLeftNames[] = {
+      "Knob 1", "Knob 2", "Knob 3", "Knob 4", "Knob 5",
+      "Knob 6", "Knob 7", "Knob 8", "Mod Wheel"};
+  constexpr const char* kRightNames[] = {
+      "Button 1", "Button 2", "Button 3", "Button 4",
+      "Button 5", "Button 6", "Button 7", "Button 8"};
+  const int count = right_screen ? static_cast<int>(std::size(kRightNames))
+                                 : static_cast<int>(std::size(kLeftNames));
+  const int base_index = right_screen ? 9 : 0;
+  const bool selected_screen =
+      selected_ccpc_column_ == (right_screen ? 1 : 0);
+  for (int row = 0; row < count; ++row) {
+    const int y = 58 + row * 22;
+    const auto& assignment = edited_control_assignments_[base_index + row];
+    const bool selected_row = selected_ccpc_row_ == row && selected_screen;
+    DrawShinonomeText(canvas, 12, y,
+                      right_screen ? kRightNames[row] : kLeftNames[row],
+                      selected_row ? 234 : 244,
+                      selected_row ? 248 : 247,
+                      selected_row ? 255 : 250);
+
+    const std::string type_text = "CC";
+    const int value = assignment.cc;
+    char value_text[24];
+    std::snprintf(value_text, sizeof(value_text), "%03d", value);
+    const bool value_selected = selected_row;
+    if (value_selected) canvas.FillRect(342, y - 2, 126, 18, 79, 195, 247);
+    DrawShinonomeText(canvas, 244, y, type_text,
+                      79, 195, 247);
+    DrawShinonomeText(canvas, 350, y, value_text,
+                      value_selected ? 6 : 244,
+                      value_selected ? 16 : 247,
+                      value_selected ? 20 : 250);
+  }
+  if (!ccpc_status_.empty()) {
+    DrawShinonomeText(canvas, 12, 250, ccpc_status_, 242, 184, 75);
   }
 }
 
@@ -963,6 +1006,8 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
     if (delta != 0) {
       if (current_screen_ == ScreenId::kKeySplit) {
         ChangeKeySplitValue(delta);
+      } else if (current_screen_ == ScreenId::kSetCcPc) {
+        ChangeSetCcPcValue(delta);
       } else {
         MoveJogSelection(delta);
       }
@@ -977,6 +1022,8 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
       if (current == mk2::kJogLeft) {
         if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitColumn(-1);
+        } else if (current_screen_ == ScreenId::kSetCcPc) {
+          MoveSetCcPcColumn(-1);
         } else {
           MoveJogSelection(-1);
         }
@@ -984,6 +1031,8 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
       } else if (current == mk2::kJogRight) {
         if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitColumn(1);
+        } else if (current_screen_ == ScreenId::kSetCcPc) {
+          MoveSetCcPcColumn(1);
         } else {
           MoveJogSelection(1);
         }
@@ -992,10 +1041,16 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
         if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitRow(-1);
           ui_changed = true;
+        } else if (current_screen_ == ScreenId::kSetCcPc) {
+          MoveSetCcPcRow(-1);
+          ui_changed = true;
         }
       } else if (current == mk2::kJogDown) {
         if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitRow(1);
+          ui_changed = true;
+        } else if (current_screen_ == ScreenId::kSetCcPc) {
+          MoveSetCcPcRow(1);
           ui_changed = true;
         }
       } else if (current == mk2::kJogPress) {
@@ -1118,9 +1173,6 @@ void ControllerApp::MoveJogSelection(int delta) {
     return;
   }
   if (current_screen_ == ScreenId::kSetCcPc) {
-    constexpr int count = 2;
-    selected_dialog_action_ =
-        (selected_dialog_action_ + delta % count + count) % count;
     return;
   }
   if (current_screen_ != ScreenId::kSoundSelect) return;
@@ -1207,6 +1259,163 @@ void ControllerApp::ChangeKeySplitValue(int delta) {
       break;
     }
   }
+}
+
+void ControllerApp::MoveSetCcPcRow(int delta) {
+  const bool right_screen = selected_ccpc_column_ == 1;
+  const int row_count = right_screen ? 8 : 9;
+  const int count = row_count + 1;  // Header plus control rows.
+  selected_ccpc_row_ =
+      ((selected_ccpc_row_ + 1 + delta % count + count) % count) - 1;
+}
+
+void ControllerApp::MoveSetCcPcColumn(int delta) {
+  if (selected_ccpc_row_ == -1) {
+    selected_ccpc_action_ = std::clamp(selected_ccpc_action_ + delta, 0, 1);
+    return;
+  }
+  selected_ccpc_column_ = std::clamp(selected_ccpc_column_ + delta, 0, 1);
+  // The left LCD has one additional row (Mod Wheel). Moving from it to the
+  // right LCD keeps the selection on the final available Button row.
+  if (selected_ccpc_column_ == 1) {
+    selected_ccpc_row_ = std::min(selected_ccpc_row_, 7);
+  }
+}
+
+void ControllerApp::ChangeSetCcPcValue(int delta) {
+  if (selected_ccpc_row_ < 0) return;
+  ccpc_status_.clear();
+  const bool right_screen = selected_ccpc_column_ == 1;
+  const int index = (right_screen ? 9 : 0) + selected_ccpc_row_;
+  auto& assignment = edited_control_assignments_[index];
+  assignment.cc = std::clamp(assignment.cc + delta, 0, 127);
+}
+
+bool ControllerApp::ApplyControlAssignments(
+    const std::array<ControlAssignment, 17>& assignments) {
+  std::vector<uint8_t> controls;
+  controls.reserve(204);
+  controls.push_back(mk2::kHidReportControlsAssign);
+  // A1 stores the eight Button entries before the eight Knob entries.
+  for (int i = 0; i < 8; ++i) {
+    const uint8_t value =
+        static_cast<uint8_t>(assignments[9 + i].cc);
+    controls.insert(controls.end(),
+                    {mk2::kControlModeMidiCc, value, 0x00,
+                     mk2::kButtonActionTrigger, 0x00, 0x00, 0x7F, 0x00,
+                     0x00, 0x00, 0x00, 0x00});
+  }
+  for (int i = 0; i < 8; ++i) {
+    const uint8_t value = static_cast<uint8_t>(assignments[i].cc);
+    controls.push_back(mk2::kControlModeMidiCc);
+    controls.push_back(value);
+    controls.push_back(0x00);  // MIDI channel 1, zero-based.
+    controls.insert(controls.end(), mk2::kKnobAssignFixedTail.begin(),
+                    mk2::kKnobAssignFixedTail.end());
+  }
+  controls.insert(controls.end(), 8, 0x0A);  // Blue Button backgrounds.
+  controls.insert(controls.end(), 3, 0x00);
+
+  std::vector<uint8_t> sliders;
+  sliders.reserve(45);
+  sliders.push_back(mk2::kHidReportSlidersAssign);
+  // Preserve the Pitch Wheel in pitch-bend mode.
+  sliders.insert(sliders.end(),
+                 {mk2::kSliderModePitch, 0x00, 0x00, 0x00, 0x00, 0x00,
+                  0xFF, 0x3F, 0x00, 0x00, 0x01, 0x00});
+  const uint8_t mod_cc = static_cast<uint8_t>(assignments[8].cc);
+  sliders.insert(sliders.end(),
+                 {mk2::kSliderModeCc, mod_cc, 0x00, 0x20, 0x00, 0x00,
+                  0x7F, 0x00, 0x00, 0x00, 0x00, 0x00});
+  // Touch Strip remains disabled until its assignment is re-verified.
+  sliders.insert(sliders.end(), 12, 0x00);
+  sliders.insert(sliders.end(), 8, 0x00);
+
+  if (dry_run_) {
+    std::fprintf(stderr, "[dry-run] -> HID Controls A1: %zu bytes\n%s",
+                 controls.size(), mk2util::PreviewHexDump(controls).c_str());
+    std::fprintf(stderr, "[dry-run] -> HID Sliders A2: %zu bytes\n%s",
+                 sliders.size(), mk2util::PreviewHexDump(sliders).c_str());
+    ccpc_status_.clear();
+    return true;
+  }
+  if (hid_device_ == nullptr || !hid_device_->IsOpen()) {
+    ccpc_status_ = "HID device is unavailable";
+    return false;
+  }
+  if (!hid_device_->WriteReport(controls) ||
+      !hid_device_->WriteReport(sliders)) {
+    ccpc_status_ = "HID write failed";
+    std::fprintf(stderr, "controller_app: control HID write failed: %s\n",
+                 hid_device_->last_error().c_str());
+    return false;
+  }
+  ccpc_status_.clear();
+  std::fprintf(stderr,
+               "controller_app: applied A1 controls and A2 Mod Wheel reports\n");
+  return true;
+}
+
+bool ControllerApp::LoadControlAssignments() {
+  std::ifstream input(kControlAssignmentsPath);
+  if (!input) {
+    std::fprintf(stderr,
+                 "controller_app: no saved control assignments; using defaults\n");
+    return false;
+  }
+
+  auto loaded = control_assignments_;
+  std::string format;
+  if (!(input >> format) || format != "S49CC1") {
+    std::fprintf(stderr,
+                 "controller_app: unsupported control assignments file; "
+                 "using defaults\n");
+    return false;
+  }
+  for (auto& assignment : loaded) {
+    int cc = 0;
+    if (!(input >> cc) || cc < 0 || cc > 127) {
+      std::fprintf(stderr,
+                   "controller_app: invalid control assignments file; "
+                   "using defaults\n");
+      return false;
+    }
+    assignment.cc = cc;
+  }
+  control_assignments_ = loaded;
+  edited_control_assignments_ = loaded;
+  std::fprintf(stderr, "controller_app: loaded control assignments from %s\n",
+               kControlAssignmentsPath);
+  return true;
+}
+
+bool ControllerApp::SaveControlAssignments(
+    const std::array<ControlAssignment, 17>& assignments) {
+  const std::string temporary_path =
+      std::string(kControlAssignmentsPath) + ".tmp";
+  {
+    std::ofstream output(temporary_path, std::ios::trunc);
+    if (!output) {
+      ccpc_status_ = "Could not open settings file";
+      return false;
+    }
+    output << "S49CC1\n";
+    for (const auto& assignment : assignments) {
+      output << assignment.cc << '\n';
+    }
+    if (!output) {
+      ccpc_status_ = "Could not write settings file";
+      return false;
+    }
+  }
+  if (std::rename(temporary_path.c_str(), kControlAssignmentsPath) != 0) {
+    std::remove(temporary_path.c_str());
+    ccpc_status_ = "Could not replace settings file";
+    return false;
+  }
+  std::fprintf(stderr, "controller_app: saved control assignments to %s\n",
+               kControlAssignmentsPath);
+  return true;
 }
 
 void ControllerApp::LoadDrumKeySplitPreset() {
@@ -1358,8 +1567,12 @@ void ControllerApp::ConfirmJogSelection() {
         break;
       case 3:
         current_screen_ = ScreenId::kSetCcPc;
-        selected_dialog_action_ = 0;
-        std::fprintf(stderr, "controller_app: screen -> Set CC/PC\n");
+        edited_control_assignments_ = control_assignments_;
+        selected_ccpc_row_ = -1;
+        selected_ccpc_column_ = 0;
+        selected_ccpc_action_ = 0;
+        ccpc_status_.clear();
+        std::fprintf(stderr, "controller_app: screen -> Set CC\n");
         break;
       default:
         std::fprintf(stderr,
@@ -1392,8 +1605,20 @@ void ControllerApp::ConfirmJogSelection() {
     return;
   }
   if (current_screen_ == ScreenId::kSetCcPc) {
-    std::fprintf(stderr, "controller_app: %s -> Settings\n",
-                 selected_dialog_action_ == 0 ? "OK" : "Cancel");
+    if (selected_ccpc_row_ != -1) return;
+    if (selected_ccpc_action_ == 0) {
+      if (!SaveControlAssignments(edited_control_assignments_)) return;
+      if (!ApplyControlAssignments(edited_control_assignments_)) {
+        return;
+      }
+      control_assignments_ = edited_control_assignments_;
+      std::fprintf(stderr,
+                   "controller_app: control assignments applied -> Settings\n");
+    } else {
+      edited_control_assignments_ = control_assignments_;
+      std::fprintf(stderr,
+                   "controller_app: control assignments cancelled -> Settings\n");
+    }
     current_screen_ = ScreenId::kSettings;
     return;
   }

@@ -25,11 +25,11 @@
 | BTN-151 | Settings | SERTRAK | SEQTRAK設定画面へ移動する | 未実装 |
 | BTN-152 | Settings | Controller | Controller設定画面へ移動する | 未実装 |
 | BTN-153 | Settings | Key Split | Key Split設定画面へ移動する | 実装完了 |
-| BTN-154 | Settings | Set CC/PC | CC/PC設定画面へ移動する | 実装済み |
+| BTN-154 | Settings | Set CC | CC設定画面へ移動する | 現行仕様完了 |
 | BTN-155 | Key Split | OK | Key Split設定を確定する | 実装完了 |
 | BTN-156 | Key Split | Cancel | 変更を破棄してSettingsへ戻る | 実装完了 |
-| BTN-157 | Set CC/PC | OK | CC/PC設定を確定してSettingsへ戻る | 遷移のみ実装 |
-| BTN-158 | Set CC/PC | Cancel | CC/PC設定の変更を破棄してSettingsへ戻る | 遷移のみ実装 |
+| BTN-157 | Set CC | OK | CC設定を確定してSettingsへ戻る | 現行仕様完了 |
+| BTN-158 | Set CC | Cancel | CC設定の変更を破棄してSettingsへ戻る | 現行仕様完了 |
 | BTN-159 | MIDI LOG | Prev. | SCR-001へ戻る | 実装済み |
 | BTN-160 | Settings | Prev. | SEQTRAK Controllerへ戻る | 実装済み |
 
