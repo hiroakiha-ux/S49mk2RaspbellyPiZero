@@ -9,7 +9,7 @@
    │  └─ Prev. → SEQTRAK Controller
    ├─ Sound Select → S49 MK2 LCD — Variation 01 — Shinonome12
    └─ Setting → Settings
-      └─ Key Split → Key Split（将来実装）
+      └─ Key Split → Key Split（実装完了）
       └─ Set CC/PC → Set CC/PC（将来実装）
 ```
 
@@ -174,7 +174,8 @@
 
 ## SCR-010: Key Split
 
-- 状態: 一部実装（画面表示とOK／Cancel遷移）
+- 状態: 実装完了（画面表示、全項目編集、プリセット、実機設定送信、
+  OK確定／Cancel破棄）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、本文17行、行ピッチ14 px
 - 用途: S49 MK2の鍵盤分割を設定する
@@ -189,22 +190,55 @@
 - ラベル: Zone数：
 - 入力範囲: 1～16
 - デフォルト値: 1
+- Drumボタン: 13 ZoneのDrumプリセットを読み込む
+- DrumSetボタン: 9 ZoneのDrumSetプリセットを読み込む
+
+#### Drumプリセット
+
+- Zone 01: C1～B1、CH12、Transpose 0、Light Guide消灯
+- Zone 02～08: C2～B2を7分割、CH1～7、各開始音をC4へ移調
+- Zone 09: C3～B3、CH8、開始音をC4へ移調
+- Zone 10: C4～B4、CH9、開始音をC4へ移調
+- Zone 11: C5～B5、CH10、開始音をC4へ移調
+- Zone 12: C6～B6、CH11、開始音をC4へ移調
+- Zone 13: C7～G9、CH13、Transpose 0、Light Guide消灯
+- Drum用Zoneの色は隣接Zoneで異なる色にする
+
+#### DrumSetプリセット
+
+- Zone 01: C1～B1、CH4、開始音をC4へ移調
+- Zone 02: C2～B2、CH1、開始音をC4へ移調
+- Zone 03: C3～B3、CH8、開始音をC4へ移調
+- Zone 04: C4～B4、CH9、開始音をC4へ移調
+- Zone 05: C5～B5、CH10、開始音をC4へ移調
+- Zone 06: C6～B6、CH11、開始音をC4へ移調
+- Zone 07: C7～B7、CH5、開始音をC4へ移調
+- Zone 08: C8～B8、CH6、開始音をC4へ移調
+- Zone 09: C9～G9、CH7、開始音をC4へ移調
+- 全Zoneに色を付け、隣接Zoneで異なる色にする
 
 ### 2～17行目
 
-- 表示形式: `Zone01:C2-G8 CH:1 Trans:C2 Color:■`
-- 操作方法：ジョグダイヤルの上下、左右で項目選択
+- 表示形式: `Zone01:C1-G9 CH:1 Trans:0(C1) Color:■`
+- 操作方法：ジョグダイヤルの上下クリックで行、左右クリックで列を選択し、
+　　ジョグダイヤルの回転で選択中の値を変更する
+　　上下移動では列位置を保持し、左右端ではカーソルを循環させない
 　　Zone数によって、対象外のZoneはnot enable状態にする。
-　　各項目の値はジョグダイヤルの回転で変更する。
 - Zone番号: 01～16　
-- Key Range初期値: C2～G8　
+- Key Range: Zone 1の開始はC1固定。各Zoneの開始は直前Zoneの終了の
+  半音上とし、重複を許可しない。最終Zoneの終了はMIDIノート127（G9）固定
+- Key Range初期値: C1～G9　
+- 音名表記: 標準MIDIノート番号（C1 = 24、G9 = 127）
 - MIDI Channel初期値: 1
-- Transpose初期値: C2
+- Transpose入力範囲: -64～+63半音
+- Transpose表示形式: `0(C4)`、`+1(C#4)`、`-1(B3)`のように、
+  移調量と各Zoneの開始キーを基準にした移調後の音名を併記する
+- Transpose初期値: 0（括弧内は各Zoneの開始キー）
 - Color: カラースウォッチで表示する
 
 ### OK
 
-- Zoneの設定を確定する
+- Zoneの設定を確定し、S49 MK2へHID `0xA4` Key Zoneレポートを送信する
 - 設定後はSettings画面へ戻る
 
 ### Cancel

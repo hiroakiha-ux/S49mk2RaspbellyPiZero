@@ -29,6 +29,27 @@ constexpr int kPanMax = 50;
 constexpr auto kKnobDoubleTouchMin = std::chrono::milliseconds(80);
 constexpr auto kKnobDoubleTouchMax = std::chrono::milliseconds(500);
 constexpr size_t kMidiLogCapacity = 11;
+constexpr int kKeySplitFieldsPerZone = 4;
+constexpr int kKeySplitLowestNote = 24;    // C1
+constexpr int kKeySplitHighestNote = 127;  // G9
+
+struct ZoneColor {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+  std::array<uint8_t, 2> hid;
+};
+
+constexpr ZoneColor kZoneColors[] = {
+    {66, 165, 245, mk2::kZoneColorBlue},
+    {239, 83, 80, mk2::kZoneColorRed},
+    {255, 152, 0, mk2::kZoneColorOrange},
+    {102, 187, 106, mk2::kZoneColorGreen},
+    {255, 202, 40, mk2::kZoneColorYellow},
+    {38, 208, 161, mk2::kZoneColorMint},
+    {171, 71, 188, mk2::kZoneColorPurple},
+    {0, 0, 0, mk2::kZoneColorOff},
+};
 
 struct HomeButtonSpec {
   const char* label;
@@ -81,9 +102,39 @@ bool EventActive(const std::vector<uint8_t>& report,
 
 std::string MidiNoteName(int note) {
   constexpr const char* kNames[] = {
-      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+      "C",  "C#", "D",  "D#", "E",  "F",
+      "F#", "G",  "G#", "A",  "A#", "B"};
   if (note < 0 || note > 127) return std::to_string(note);
-  return std::string(kNames[note % 12]) + std::to_string(note / 12 - 2);
+  return std::string(kNames[note % 12]) + std::to_string(note / 12 - 1);
+}
+
+std::string KeySplitNoteName(int note) {
+  constexpr const char* kNames[] = {
+      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+  note = std::clamp(note, 0, 127);
+  return std::string(kNames[note % 12]) + std::to_string(note / 12 - 1);
+}
+
+std::string ExtendedNoteName(int note) {
+  constexpr const char* kNames[] = {
+      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+  // C++ division truncates toward zero; adjust to mathematical floor so
+  // negative extended note numbers retain the expected pitch class.
+  int octave_division = note / 12;
+  int pitch_class = note % 12;
+  if (pitch_class < 0) {
+    pitch_class += 12;
+    --octave_division;
+  }
+  return std::string(kNames[pitch_class]) +
+         std::to_string(octave_division - 1);
+}
+
+std::string FormatKeySplitTranspose(int semitones, int zone_start_note) {
+  std::string amount = semitones > 0 ? "+" + std::to_string(semitones)
+                                     : std::to_string(semitones);
+  return amount + "(" +
+         ExtendedNoteName(zone_start_note + semitones) + ")";
 }
 
 std::string FormatMidiLogLine(const mk2::MidiMessage& message) {
@@ -468,7 +519,8 @@ void ControllerApp::DrawKeySplit(mk2::LcdCanvas& canvas) {
   constexpr int kActionX[] = {340, 388};
   constexpr int kActionWidth[] = {40, 76};
   for (int i = 0; i < 2; ++i) {
-    const bool selected = selected_dialog_action_ == i;
+    const bool selected = selected_key_split_row_ == -1 &&
+                          selected_key_split_action_ == i;
     FillRoundedRect(canvas, kActionX[i], 4, kActionWidth[i], 20, 3,
                     selected ? 0 : 32, selected ? 215 : 42,
                     selected ? 255 : 51);
@@ -477,14 +529,94 @@ void ControllerApp::DrawKeySplit(mk2::LcdCanvas& canvas) {
                       selected ? 20 : 192);
   }
 
-  DrawShinonomeText(canvas, 12, 38, "Zones: 1", 244, 247, 250);
-  DrawShinonomeText(canvas, 12, 58, "Zone01:C2-G8 CH:1 Trans:C2", 244, 247,
-                    250);
-  canvas.FillRect(326, 59, 12, 12, 79, 195, 247);
-  for (int zone = 2; zone <= 11; ++zone) {
-    char line[64];
-    std::snprintf(line, sizeof(line), "Zone%02d: -- disabled --", zone);
-    DrawShinonomeText(canvas, 12, 58 + (zone - 1) * 18, line, 82, 97, 109);
+  const bool zones_selected =
+      selected_key_split_row_ == 0 && selected_key_split_zones_action_ == 0;
+  if (zones_selected) canvas.FillRect(8, 31, 112, 14, 37, 73, 88);
+  DrawShinonomeText(canvas, 12, 32,
+                    "Zones: " +
+                        std::to_string(edited_key_split_settings_.zone_count),
+                    zones_selected ? 79 : 244, zones_selected ? 195 : 247,
+                    zones_selected ? 247 : 250);
+
+  constexpr const char* kPresetLabels[] = {"Drum", "DrumSet"};
+  constexpr int kPresetX[] = {144, 224};
+  constexpr int kPresetWidth[] = {68, 92};
+  for (int i = 0; i < 2; ++i) {
+    const bool selected = selected_key_split_row_ == 0 &&
+                          selected_key_split_zones_action_ == i + 1;
+    FillRoundedRect(canvas, kPresetX[i], 30, kPresetWidth[i], 16, 2,
+                    selected ? 79 : 32, selected ? 195 : 42,
+                    selected ? 247 : 51);
+    DrawShinonomeText(canvas, kPresetX[i] + 6, 32, kPresetLabels[i],
+                      selected ? 6 : 170, selected ? 16 : 179,
+                      selected ? 20 : 192);
+  }
+
+  for (int zone = 0; zone < 16; ++zone) {
+    const bool enabled = zone < edited_key_split_settings_.zone_count;
+    const bool row_selected = selected_key_split_row_ == zone + 1;
+    const int selected_field = selected_key_split_column_;
+    const int y = 46 + zone * 14;
+    if (row_selected) {
+      canvas.FillRect(8, y - 1, 456, 14, 37, 73, 88);
+    }
+
+    const auto& value = edited_key_split_settings_.zones[zone];
+    const std::string zone_label =
+        "Zone" + (zone < 9 ? std::string("0") : std::string()) +
+        std::to_string(zone + 1) + ":";
+    const std::string low = KeySplitNoteName(value.low_note);
+    const std::string high = KeySplitNoteName(value.high_note);
+    char channel_text[8];
+    std::snprintf(channel_text, sizeof(channel_text), "CH:%02d",
+                  value.midi_channel);
+    const std::string transpose =
+        "Trans:" + FormatKeySplitTranspose(value.transpose, value.low_note);
+    const std::string line = zone_label + low + "-" + high + " " +
+                             channel_text + " " + transpose + " Color:";
+    const uint8_t text = enabled ? 244 : 82;
+    DrawShinonomeText(canvas, 12, y, line,
+                      row_selected ? 234 : text,
+                      row_selected ? 248 : (enabled ? 247 : 97),
+                      row_selected ? 255 : (enabled ? 250 : 109));
+    if (enabled) {
+      const auto& color = kZoneColors[value.color];
+      canvas.FillRect(432, y + 1, 10, 10, color.r, color.g, color.b);
+    }
+
+    // Redraw the selected field over a bright background. Including CH,
+    // Trans and Color labels makes the active property unambiguous.
+    if (row_selected && selected_field >= 0 &&
+        selected_field < kKeySplitFieldsPerZone) {
+      std::string prefix;
+      std::string selected_text;
+      if (selected_field == 0) {
+        prefix = zone_label + low + "-";
+        selected_text = high;
+      } else if (selected_field == 1) {
+        prefix = zone_label + low + "-" + high + " ";
+        selected_text = channel_text;
+      } else if (selected_field == 2) {
+        prefix = zone_label + low + "-" + high + " " + channel_text + " ";
+        selected_text = transpose;
+      } else {
+        prefix = zone_label + low + "-" + high + " " + channel_text + " " +
+                 transpose + " ";
+        selected_text = "Color:";
+      }
+      const int field_x = 12 + mk2::LcdCanvas::MeasureUtf8Width(prefix, 1);
+      const int field_width =
+          mk2::LcdCanvas::MeasureUtf8Width(selected_text, 1);
+      canvas.FillRect(field_x - 1, y - 1,
+                      field_width + (selected_field == 3 ? 14 : 2), 14,
+                      79, 195, 247);
+      DrawShinonomeText(canvas, field_x, y, selected_text, 6, 16, 20);
+      if (selected_field == 3 && enabled) {
+        const auto& color = kZoneColors[value.color];
+        canvas.FillRect(field_x + field_width + 2, y + 1, 10, 10, color.r,
+                        color.g, color.b);
+      }
+    }
   }
 }
 
@@ -829,7 +961,11 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
         previous_hid_report_[mk2::kInputByteJogTurn] & 0x0F,
         report[mk2::kInputByteJogTurn] & 0x0F, 16);
     if (delta != 0) {
-      MoveJogSelection(delta);
+      if (current_screen_ == ScreenId::kKeySplit) {
+        ChangeKeySplitValue(delta);
+      } else {
+        MoveJogSelection(delta);
+      }
       ui_changed = true;
     }
   }
@@ -839,11 +975,29 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
     uint8_t previous = previous_jog_control;
     if (current != previous) {
       if (current == mk2::kJogLeft) {
-        MoveJogSelection(-1);
+        if (current_screen_ == ScreenId::kKeySplit) {
+          MoveKeySplitColumn(-1);
+        } else {
+          MoveJogSelection(-1);
+        }
         ui_changed = true;
       } else if (current == mk2::kJogRight) {
-        MoveJogSelection(1);
+        if (current_screen_ == ScreenId::kKeySplit) {
+          MoveKeySplitColumn(1);
+        } else {
+          MoveJogSelection(1);
+        }
         ui_changed = true;
+      } else if (current == mk2::kJogUp) {
+        if (current_screen_ == ScreenId::kKeySplit) {
+          MoveKeySplitRow(-1);
+          ui_changed = true;
+        }
+      } else if (current == mk2::kJogDown) {
+        if (current_screen_ == ScreenId::kKeySplit) {
+          MoveKeySplitRow(1);
+          ui_changed = true;
+        }
       } else if (current == mk2::kJogPress) {
         ConfirmJogSelection();
         ui_changed = true;
@@ -960,8 +1114,10 @@ void ControllerApp::MoveJogSelection(int delta) {
         (selected_settings_item_ + delta % count + count) % count;
     return;
   }
-  if (current_screen_ == ScreenId::kKeySplit ||
-      current_screen_ == ScreenId::kSetCcPc) {
+  if (current_screen_ == ScreenId::kKeySplit) {
+    return;
+  }
+  if (current_screen_ == ScreenId::kSetCcPc) {
     constexpr int count = 2;
     selected_dialog_action_ =
         (selected_dialog_action_ + delta % count + count) % count;
@@ -977,6 +1133,204 @@ void ControllerApp::MoveJogSelection(int delta) {
     int& type = track_types_[selected_track_];
     type = (type + delta % count + count) % count;
   }
+}
+
+void ControllerApp::MoveKeySplitRow(int delta) {
+  // Header + Zones + enabled Zone rows. Disabled rows are intentionally
+  // skipped because the Zone count controls whether they can be edited.
+  const int count = edited_key_split_settings_.zone_count + 2;
+  selected_key_split_row_ =
+      ((selected_key_split_row_ + 1 + delta % count + count) % count) - 1;
+}
+
+void ControllerApp::MoveKeySplitColumn(int delta) {
+  if (selected_key_split_row_ == -1) {
+    selected_key_split_action_ =
+        std::clamp(selected_key_split_action_ + delta, 0, 1);
+  } else if (selected_key_split_row_ == 0) {
+    selected_key_split_zones_action_ =
+        std::clamp(selected_key_split_zones_action_ + delta, 0, 2);
+  } else {
+    selected_key_split_column_ = std::clamp(
+        selected_key_split_column_ + delta, 0, kKeySplitFieldsPerZone - 1);
+  }
+}
+
+void ControllerApp::ChangeKeySplitValue(int delta) {
+  if (selected_key_split_row_ == 0) {
+    if (selected_key_split_zones_action_ != 0) return;
+    const int previous_count = edited_key_split_settings_.zone_count;
+    const int new_count = std::clamp(previous_count + delta, 1, 16);
+    edited_key_split_settings_.zone_count = new_count;
+    if (new_count > previous_count) {
+      // Give newly enabled Zones useful, evenly spaced boundaries instead
+      // of initially leaving the first Zone at G9 (which would take many
+      // wheel turns to correct).
+      constexpr int kNoteCount =
+          kKeySplitHighestNote - kKeySplitLowestNote + 1;
+      for (int i = 0; i < new_count; ++i) {
+        edited_key_split_settings_.zones[i].high_note =
+            i == new_count - 1
+                ? kKeySplitHighestNote
+                : kKeySplitLowestNote +
+                      (kNoteCount * (i + 1)) / new_count - 1;
+      }
+    }
+    NormalizeKeySplitRanges(edited_key_split_settings_);
+    return;
+  }
+  if (selected_key_split_row_ < 1) return;
+  const int zone_index = selected_key_split_row_ - 1;
+  const int field = selected_key_split_column_;
+  auto& zone = edited_key_split_settings_.zones[zone_index];
+  switch (field) {
+    case 0:
+      // Leave at least one note for every following enabled Zone. The last
+      // Zone always ends at MIDI note 127 (G9), covering C1..G9.
+      if (zone_index + 1 < edited_key_split_settings_.zone_count) {
+        const int remaining = edited_key_split_settings_.zone_count -
+                              zone_index - 1;
+        zone.high_note = std::clamp(zone.high_note + delta, zone.low_note,
+                                    kKeySplitHighestNote - remaining);
+        NormalizeKeySplitRanges(edited_key_split_settings_);
+      }
+      break;
+    case 1:
+      zone.midi_channel = std::clamp(zone.midi_channel + delta, 1, 16);
+      break;
+    case 2:
+      zone.transpose = std::clamp(zone.transpose + delta, -64, 63);
+      break;
+    case 3: {
+      constexpr int count = static_cast<int>(std::size(kZoneColors));
+      zone.color = (zone.color + delta % count + count) % count;
+      break;
+    }
+  }
+}
+
+void ControllerApp::LoadDrumKeySplitPreset() {
+  // Zone 1/13 leave the Light Guide dark and preserve the outer keyboard
+  // ranges. Zones 2..12 map the eleven SEQTRAK tracks to contiguous ranges.
+  constexpr int kDrumRangeEnd[] = {
+      37, 39, 40, 42, 44, 46, 47, 59, 71, 83, 95,
+  };
+
+  edited_key_split_settings_.zone_count = 13;
+  auto& low = edited_key_split_settings_.zones[0];
+  low.high_note = 35;  // C1-B1
+  low.midi_channel = 12;
+  low.transpose = 0;
+  low.color = 7;  // Light Guide off/black
+
+  int start_note = 36;  // C2
+  constexpr int kTargetNote = 60;  // C4
+  for (int i = 0; i < 11; ++i) {
+    auto& zone = edited_key_split_settings_.zones[i + 1];
+    zone.low_note = start_note;
+    zone.high_note = kDrumRangeEnd[i];
+    zone.midi_channel = i + 1;
+    zone.transpose = kTargetNote - start_note;
+    zone.color = i % 7;
+    start_note = zone.high_note + 1;
+  }
+
+  auto& high = edited_key_split_settings_.zones[12];
+  high.low_note = 96;   // C7
+  high.high_note = 127; // G9
+  high.midi_channel = 13;
+  high.transpose = 0;
+  high.color = 7;
+  NormalizeKeySplitRanges(edited_key_split_settings_);
+  std::fprintf(stderr, "controller_app: loaded Drum Key Split preset\n");
+}
+
+void ControllerApp::LoadDrumSetKeySplitPreset() {
+  constexpr int kChannels[] = {4, 1, 8, 9, 10, 11, 5, 6, 7};
+  constexpr int kRangeEnd[] = {35, 47, 59, 71, 83, 95, 107, 119, 127};
+  constexpr int kTargetNote = 60;  // C4
+
+  edited_key_split_settings_.zone_count = 9;
+  int start_note = 24;  // C1
+  for (int i = 0; i < 9; ++i) {
+    auto& zone = edited_key_split_settings_.zones[i];
+    zone.low_note = start_note;
+    zone.high_note = kRangeEnd[i];
+    zone.midi_channel = kChannels[i];
+    zone.transpose = kTargetNote - start_note;
+    zone.color = i % 7;
+    start_note = zone.high_note + 1;
+  }
+  NormalizeKeySplitRanges(edited_key_split_settings_);
+  std::fprintf(stderr, "controller_app: loaded DrumSet Key Split preset\n");
+}
+
+void ControllerApp::NormalizeKeySplitRanges(KeySplitSettings& settings) {
+  settings.zone_count = std::clamp(settings.zone_count, 1, 16);
+  int next_start = kKeySplitLowestNote;
+  for (int i = 0; i < settings.zone_count; ++i) {
+    auto& zone = settings.zones[i];
+    zone.low_note = next_start;
+    const int remaining = settings.zone_count - i - 1;
+    zone.high_note =
+        i == settings.zone_count - 1
+            ? kKeySplitHighestNote
+            : std::clamp(zone.high_note, zone.low_note,
+                         kKeySplitHighestNote - remaining);
+    next_start = zone.high_note + 1;
+  }
+}
+
+std::vector<uint8_t> ControllerApp::BuildKeySplitReport(
+    const KeySplitSettings& settings) const {
+  std::vector<uint8_t> report;
+  report.reserve(1 + mk2::kKeyzoneCount * mk2::kKeyzoneEntryLen);
+  report.push_back(mk2::kHidReportKeyzones);
+  for (int i = 0; i < mk2::kKeyzoneCount; ++i) {
+    if (i < settings.zone_count) {
+      const auto& zone = settings.zones[i];
+      const auto& color = kZoneColors[zone.color];
+      report.push_back(static_cast<uint8_t>(zone.high_note));
+      report.push_back(static_cast<uint8_t>(zone.transpose));
+      report.push_back(static_cast<uint8_t>(zone.midi_channel - 1));
+      report.push_back(mk2::kVelocityCurveLinear);
+      report.insert(report.end(), color.hid.begin(), color.hid.end());
+      report.push_back(0x00);
+      report.push_back(0x00);
+    } else {
+      report.push_back(0x7F);
+      report.push_back(0x00);
+      report.push_back(0x00);
+      report.push_back(mk2::kVelocityCurveZoneOff);
+      report.insert(report.end(), mk2::kZoneColorOff.begin(),
+                    mk2::kZoneColorOff.end());
+      report.push_back(0x00);
+      report.push_back(0x00);
+    }
+  }
+  return report;
+}
+
+bool ControllerApp::ApplyKeySplitSettings(
+    const KeySplitSettings& settings) {
+  const auto report = BuildKeySplitReport(settings);
+  if (dry_run_) {
+    std::fprintf(stderr, "[dry-run] -> HID Key Zones: %zu byte report\n%s",
+                 report.size(), mk2util::PreviewHexDump(report).c_str());
+    return true;
+  }
+  if (hid_device_ == nullptr || !hid_device_->IsOpen()) {
+    std::fprintf(stderr,
+                 "controller_app: cannot apply Key Split: HID unavailable\n");
+    return false;
+  }
+  if (!hid_device_->WriteReport(report)) {
+    std::fprintf(stderr, "controller_app: Key Split HID write failed: %s\n",
+                 hid_device_->last_error().c_str());
+    return false;
+  }
+  std::fprintf(stderr, "controller_app: applied 129-byte Key Split report\n");
+  return true;
 }
 
 void ControllerApp::ConfirmJogSelection() {
@@ -995,7 +1349,11 @@ void ControllerApp::ConfirmJogSelection() {
         break;
       case 2:
         current_screen_ = ScreenId::kKeySplit;
-        selected_dialog_action_ = 0;
+        edited_key_split_settings_ = key_split_settings_;
+        selected_key_split_row_ = -1;
+        selected_key_split_column_ = 0;
+        selected_key_split_action_ = 0;
+        selected_key_split_zones_action_ = 0;
         std::fprintf(stderr, "controller_app: screen -> Key Split\n");
         break;
       case 3:
@@ -1011,8 +1369,29 @@ void ControllerApp::ConfirmJogSelection() {
     }
     return;
   }
-  if (current_screen_ == ScreenId::kKeySplit ||
-      current_screen_ == ScreenId::kSetCcPc) {
+  if (current_screen_ == ScreenId::kKeySplit) {
+    if (selected_key_split_row_ == 0) {
+      if (selected_key_split_zones_action_ == 1) {
+        LoadDrumKeySplitPreset();
+      } else if (selected_key_split_zones_action_ == 2) {
+        LoadDrumSetKeySplitPreset();
+      }
+      return;
+    }
+    if (selected_key_split_row_ != -1) return;
+    if (selected_key_split_action_ == 0) {
+      NormalizeKeySplitRanges(edited_key_split_settings_);
+      if (!ApplyKeySplitSettings(edited_key_split_settings_)) return;
+      key_split_settings_ = edited_key_split_settings_;
+      std::fprintf(stderr, "controller_app: Key Split committed -> Settings\n");
+    } else {
+      edited_key_split_settings_ = key_split_settings_;
+      std::fprintf(stderr, "controller_app: Key Split cancelled -> Settings\n");
+    }
+    current_screen_ = ScreenId::kSettings;
+    return;
+  }
+  if (current_screen_ == ScreenId::kSetCcPc) {
     std::fprintf(stderr, "controller_app: %s -> Settings\n",
                  selected_dialog_action_ == 0 ? "OK" : "Cancel");
     current_screen_ = ScreenId::kSettings;

@@ -8,6 +8,7 @@
 - 実線: 仕様として定義されている画面遷移または処理
 - 点線: Penpot Prototypeだけに設定されている遷移
 - 「設計済み」: Penpotに画面はあるが、C++では未実装
+- 「実装完了」: 画面、操作、実機への設定反映まで実装・確認済み
 - 「未定義」: ボタンは定義されているが、遷移先画面の仕様がない
 
 ## 仕様上の画面・ボタンフロー
@@ -42,7 +43,7 @@ flowchart TD
     SETTINGS -->|"BTN-150 S49MK2"| S49["S49 MK2設定<br/>画面仕様は未定義"]
     SETTINGS -->|"BTN-151 SERTRAK"| SEQ["SEQTRAK設定<br/>画面仕様は未定義"]
     SETTINGS -->|"BTN-152 Controller"| CTRL["Controller設定<br/>画面仕様は未定義"]
-    SETTINGS -->|"BTN-153 Key Split"| SPLIT["SCR-010<br/>Key Split<br/>設計済み"]
+    SETTINGS -->|"BTN-153 Key Split"| SPLIT["SCR-010<br/>Key Split<br/>実装完了"]
     SETTINGS -->|"BTN-154 Set CC/PC"| CCPC["SCR-011<br/>Set CC/PC<br/>設計済み"]
     SETTINGS -->|"BTN-160 Prev."| HOME
     SPLIT -->|"BTN-155 OK<br/>確定"| SETTINGS
@@ -117,7 +118,7 @@ flowchart LR
     HOME["SEQTRAK Controller"]
     VAR["Variation 01"]
     SETTINGS["Settings"]
-    SPLIT["Key Split"]
+    SPLIT["✅ Key Split"]
     CCPC["Set CC / PC"]
     LOG["✅ MIDI LOG"]
     DS["Drum Set"]
@@ -157,7 +158,7 @@ flowchart LR
     linkStyle 0,1,2,18,19,20,21,22,23,24,25 stroke:#2e7d32,stroke-width:3px
     linkStyle 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 stroke:#808080,stroke-width:2px
     classDef implemented fill:#d7f5df,stroke:#2e7d32,stroke-width:3px,color:#1b5e20
-    class LOG implemented
+    class LOG,SPLIT implemented
 ```
 
 Settings内の図示されていないその他のボタンには、Penpot Prototypeリンクは

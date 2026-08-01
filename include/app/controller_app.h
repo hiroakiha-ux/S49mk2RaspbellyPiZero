@@ -66,6 +66,19 @@ class ControllerApp {
   enum class ActionId { kPlay, kSoundSelect, kSetting };
   enum class LcdUiMode { kTrackSelect, kTrackTypeSelect, kTrackDetail };
 
+  struct KeySplitZone {
+    int low_note = 24;    // Standard MIDI C1
+    int high_note = 127;  // Standard MIDI G9
+    int midi_channel = 1;
+    int transpose = 0;  // Signed semitones, -64..+63
+    int color = 0;
+  };
+
+  struct KeySplitSettings {
+    int zone_count = 1;
+    std::array<KeySplitZone, 16> zones{};
+  };
+
   void DrawStartupScreens();
   void DrawLeftLcdUi();
   void DrawControllerHome(mk2::LcdCanvas& canvas);
@@ -84,6 +97,15 @@ class ControllerApp {
   void ApplyPendingMidiControls();
   void MoveJogSelection(int delta);
   void ConfirmJogSelection();
+  void MoveKeySplitRow(int delta);
+  void MoveKeySplitColumn(int delta);
+  void ChangeKeySplitValue(int delta);
+  void NormalizeKeySplitRanges(KeySplitSettings& settings);
+  void LoadDrumKeySplitPreset();
+  void LoadDrumSetKeySplitPreset();
+  std::vector<uint8_t> BuildKeySplitReport(
+      const KeySplitSettings& settings) const;
+  bool ApplyKeySplitSettings(const KeySplitSettings& settings);
   void OnSequencerNoteEvent(const mk2seq::NoteEvent& event);
 
   std::unique_ptr<mk2::HidDevice> hid_device_;
@@ -98,6 +120,14 @@ class ControllerApp {
   int selected_home_button_ = 0;
   int selected_settings_item_ = 0;
   int selected_dialog_action_ = 0;
+  KeySplitSettings key_split_settings_{};
+  KeySplitSettings edited_key_split_settings_{};
+  // -1 is the header (OK/Cancel), 0 is Zones, 1..16 are Zone rows. Zone-row
+  // columns are End, Channel, Transpose, Color; Start is derived/read-only.
+  int selected_key_split_row_ = -1;
+  int selected_key_split_column_ = 0;
+  int selected_key_split_action_ = 0;
+  int selected_key_split_zones_action_ = 0;
   LcdUiMode lcd_ui_mode_ = LcdUiMode::kTrackSelect;
   int selected_track_ = 0;
   int selected_track_type_ = 0;
