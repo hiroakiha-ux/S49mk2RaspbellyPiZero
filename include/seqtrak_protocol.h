@@ -140,7 +140,9 @@ constexpr BankSelect kBankSoundPresetBase = {0x3F, 0x00, "Drum/Synth/DX Sound Pr
 constexpr BankSelect kBankSoundUserBase = {0x3F, 0x20, "Drum/Synth/DX Sound User bank 1 (LSB 0x20-0x2F = user 1-16)"};
 constexpr BankSelect kBankSamplerElementPresetBase = {0x3E, 0x00, "SAMPLER Element Preset bank (LSB 0x00-0x03 = presets 1-4)"};
 constexpr BankSelect kBankSamplerElementUserBase = {0x3E, 0x04, "SAMPLER Element User bank (LSB 0x04-0x0B = user 1-8)"};
-constexpr BankSelect kBankDrumKitBase = {0x20, 0x00, "DrumKit Sound bank; MSB 0x20-0x26 selects drum part 1-7"};
+constexpr BankSelect kBankDrumKitBase = {
+    0x20, 0x00,
+    "Drum Kit Sound bank; MSB 0x20-0x26 selects drum part 1-7"};
 
 // ---------------------------------------------------------------------------
 // System Exclusive envelope (MIDI Data Format §3-5)

@@ -25,20 +25,34 @@ flowchart TD
     ERROR --> HOME
 
     HOME -->|"BTN-002 Sound Select"| VAR["SCR-002<br/>Variation 01<br/>実装済み"]
-    VAR -->|"BTN-010～020<br/>トラック選択・ジョグ押下"| TRACK{"選択トラック／<br/>Track Type"}
-    TRACK -->|"DX"| DX["SCR-005<br/>DX Sound Category<br/>設計済み"]
-    TRACK -->|"SAMPLER"| SAMPLER["SCR-006<br/>SAMPLER Sound Category<br/>設計済み"]
-    TRACK -->|"Drum"| DRUM["SCR-003<br/>Drum Sound Category<br/>設計済み"]
-    TRACK -->|"Synth"| SYNTH["SCR-004<br/>Synth Sound Category<br/>設計済み"]
-    TRACK -->|"DrumKit"| DRUMSET["SCR-008<br/>DrumSet<br/>設計済み"]
+    VAR -->|"✅ Prev."| HOME
+    VAR -->|"✅ OK<br/>全Soundプリセット送信"| VAR
+    VAR -->|"✅ トラック選択・ジョグ押下"| TRACK{"選択トラック／<br/>Track Type"}
+    TRACK -->|"✅ DX"| DX["SCR-005<br/>DX Sound Category<br/>遷移実装済み"]
+    TRACK -->|"✅ SAMPLER"| SAMPLER["SCR-006<br/>SAMPLER Sound Category<br/>遷移実装済み"]
+    TRACK -->|"✅ Drum"| DRUM["SCR-003<br/>Drum Sound Category<br/>遷移実装済み"]
+    TRACK -->|"✅ Synth"| SYNTH["SCR-004<br/>Synth Sound Category<br/>遷移実装済み"]
+    TRACK -->|"✅ Drum Kit"| DRUMKIT["SCR-008<br/>Drum Kit<br/>画面実装済み"]
+    DX -->|"✅ Prev."| VAR
+    SAMPLER -->|"✅ Prev."| VAR
+    DRUM -->|"✅ Prev."| VAR
+    SYNTH -->|"✅ Prev."| VAR
+    DRUMKIT -->|"✅ Prev."| VAR
+    DRUMKIT -->|"◆ OK<br/>Drum Kit確定"| VAR
 
-    DRUM -->|"BTN-030～044<br/>カテゴリ選択"| LIST["SCR-007<br/>Sound List<br/>設計済み"]
-    SYNTH -->|"BTN-050～064<br/>カテゴリ選択"| LIST
-    DX -->|"BTN-070～084<br/>カテゴリ選択"| LIST
-    SAMPLER -->|"BTN-090～104<br/>カテゴリ選択"| LIST
-    LIST -->|"BTN-110～124<br/>Sound選択"| AUDITION["SEQTRAKへSoundを設定<br/>C3を0.5秒送信して試聴"]
-    AUDITION --> LIST
-    DRUMSET -->|"BTN-130～137<br/>Type／パート選択"| DRUMSET
+    DRUM -->|"✅ BTN-030～044<br/>カテゴリ選択"| LIST["SCR-007<br/>Sound List<br/>実装済み"]
+    SYNTH -->|"✅ BTN-050～064<br/>カテゴリ選択"| LIST
+    DX -->|"✅ BTN-070～084<br/>カテゴリ選択"| LIST
+    SAMPLER -->|"✅ BTN-090～104<br/>カテゴリ選択"| LIST
+    LIST -->|"✅ Sound選択"| APPLY["Bank Select＋Program Change<br/>SEQTRAKへ設定"]
+    APPLY -->|"通常トラック"| VAR
+    APPLY -->|"Drum Kitパート"| DRUMKIT
+    LIST -->|"✅ Prev."| DRUM
+    LIST -->|"✅ Prev."| SYNTH
+    LIST -->|"✅ Prev."| DX
+    LIST -->|"✅ Prev."| SAMPLER
+    DRUMKIT -->|"BTN-130 Type選択表示"| DRUMKIT
+    DRUMKIT -->|"✅ BTN-131～137<br/>パート選択"| DRUM
 
     HOME -->|"BTN-003 Setting"| SETTINGS["SCR-009<br/>Settings<br/>画面表示実装済み"]
     SETTINGS -->|"BTN-150 S49MK2"| S49["S49 MK2設定<br/>画面仕様は未定義"]
@@ -71,7 +85,8 @@ flowchart LR
 
 SCR-002の現在のC++実装では、ジョグ押下後も別画面へは遷移せず、同一画面内で
 `TrackSelect` → `TrackTypeSelect` → `TrackDetail`とモードが変わります。
-`TrackDetail`ではKnob 1がVolume、Knob 2がPanを変更します。
+Variation 01ではVolume／Pan編集を行わず、右LCDに全トラックの
+Category／Soundを一覧表示します。
 
 ## 現在のC++実装フロー
 
@@ -94,18 +109,21 @@ stateDiagram-v2
     KeySplit --> Settings: OK／Cancel
     SetCcPc --> Settings: OK／Cancel
     ControllerHome --> TrackSelect: Sound Select
+    TrackSelect --> ControllerHome: Prev.
     TrackSelect --> TrackSelect: ジョグ回転／トラック選択
-    TrackSelect --> TrackDetail: DXまたはSAMPLERでジョグ押下
+    TrackSelect --> SoundDestination: DXまたはSAMPLERでジョグ押下
     TrackSelect --> TrackTypeSelect: その他のトラックでジョグ押下
     TrackTypeSelect --> TrackTypeSelect: ジョグ回転／Type選択
-    TrackTypeSelect --> TrackDetail: ジョグ押下
-    TrackDetail --> TrackDetail: Knob 1／Volume変更
-    TrackDetail --> TrackDetail: Knob 2／Pan変更
+    TrackTypeSelect --> SoundDestination: ジョグ押下
+    SoundDestination --> TrackSelect: Prev.
 ```
 
-現状のC++で画面IDとして実装されているのは`ControllerHome`、
-`SoundSelect`、`Settings`、`KeySplit`、`SetCcPc`、`MidiLog`です。
-カテゴリ、Sound List、DrumSetへの遷移は未実装です。
+現状のC++では上記に加え、各Sound Categoryと`DrumKit`の画面IDも
+実装されています（C++識別子は空白を含められないため`DrumKit`）。
+各Sound Category／Drum Kitへの遷移とPrev.は実装済みです。
+各Sound CategoryからSound Listへの遷移、全プリセットの選択、SEQTRAKへの
+設定、遷移元に応じた戻り先、Variation 01のOKによる一括再送まで実装済みです。
+Drum Kitトラック型への外部MIDI切り替え方法は未解析のためTODOです。
 
 ## Penpot Prototype遷移
 
@@ -123,7 +141,7 @@ flowchart LR
     SPLIT["✅ Key Split"]
     CCPC["◆ Set CC"]
     LOG["✅ MIDI LOG"]
-    DS["Drum Set"]
+    DS["Drum Kit"]
     DSC["Drum Sound Category"]
     SSC["Synth Sound Category"]
     DxSC["DX Sound Category"]
@@ -133,16 +151,16 @@ flowchart LR
     HOME -->|"✅ Play"| LOG
     HOME -->|"✅ Sound Select"| VAR
     HOME -->|"✅ Setting"| SETTINGS
-    VAR -->|"⬜ Next"| DS
+    VAR -->|"✅ Drum Kit"| DS
     VAR -->|"⬜ Next"| DSC
     VAR -->|"⬜ Next"| SSC
     VAR -->|"⬜ Next"| DxSC
     VAR -->|"⬜ Next"| SaSC
-    DS -->|"⬜ KICK/SNARE/CLAP/HAT 1/HAT 2/PERC 1/PERC 2"| DSC
-    DSC -->|"⬜ KICK/SNARE/CLAP/HAT 1/HAT 2/PERC 1/PERC 2"| SLIST
-    SSC -->|"⬜ Bass/KeyBoard"| SLIST
-    DxSC -->|"⬜ Bass/KeyBoard"| SLIST
-    SaSC -->|"⬜ Vocal/SFX"| SLIST
+    DS -->|"✅ KICK/SNARE/CLAP/HAT 1/HAT 2/PERC 1/PERC 2"| DSC
+    DSC -->|"✅ Category"| SLIST
+    SSC -->|"✅ Category"| SLIST
+    DxSC -->|"✅ Category"| SLIST
+    SaSC -->|"✅ Category"| SLIST
     SLIST -->|"⬜ Next"| DS
     SLIST -->|"⬜ Next"| DSC
     SLIST -->|"⬜ Next"| SSC
@@ -157,9 +175,9 @@ flowchart LR
     CCPC -->|"◆ Cancel"| SETTINGS
     LOG -->|"✅ Prev."| HOME
 
-    linkStyle 0,1,2,18,19,21,22,25 stroke:#2e7d32,stroke-width:3px
+    linkStyle 0,1,2,3,8,9,10,11,12,18,19,21,22,25 stroke:#2e7d32,stroke-width:3px
     linkStyle 20,23,24 stroke:#ef6c00,stroke-width:3px
-    linkStyle 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 stroke:#808080,stroke-width:2px
+    linkStyle 4,5,6,7,13,14,15,16,17 stroke:#808080,stroke-width:2px
     classDef implemented fill:#d7f5df,stroke:#2e7d32,stroke-width:3px,color:#1b5e20
     classDef currentComplete fill:#fff3e0,stroke:#ef6c00,stroke-width:3px,color:#bf360c
     class LOG,SPLIT implemented

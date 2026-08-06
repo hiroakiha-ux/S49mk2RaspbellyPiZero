@@ -18,6 +18,7 @@
 //   (Program 1 on KICK, preset bank 1, should be "Tight Punchy Kick 1" per
 //   SEQTRAK_data_list_En_D0.pdf's Drum Sound List, p.3, if the name really
 //   does live on the device.)
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +37,24 @@ namespace {
 
 bool IsSystemRealtimeByte(uint8_t b) {
   return b == 0xF8 || b == 0xFA || b == 0xFB || b == 0xFC || b == 0xFE;
+}
+
+// MIDI data bytes cannot carry bit 7. SEQTRAK therefore stores UTF-8 in
+// groups of one bit-mask byte followed by up to seven low-7-bit data bytes.
+// Bit n of the mask restores bit 7 of data byte n.
+std::vector<uint8_t> Decode7BitEncodedUtf8(
+    const std::vector<uint8_t>& encoded) {
+  std::vector<uint8_t> decoded;
+  for (size_t group = 0; group < encoded.size(); group += 8) {
+    uint8_t high_bits = encoded[group];
+    size_t group_end = std::min(group + 8, encoded.size());
+    for (size_t pos = group + 1; pos < group_end; ++pos) {
+      size_t data_index = pos - group - 1;
+      decoded.push_back(static_cast<uint8_t>(
+          encoded[pos] | (((high_bits >> data_index) & 0x01) << 7)));
+    }
+  }
+  return decoded;
 }
 
 std::optional<std::vector<uint8_t>> ReadSysExReply(mk2::AlsaRawMidiPort& port,
@@ -168,9 +187,11 @@ int main(int argc, char** argv) {
   std::fprintf(stderr, "seqtrak_name_probe: raw bytes:\n%s",
                mk2util::HexDump(name_bytes).c_str());
 
+  std::vector<uint8_t> decoded_name = Decode7BitEncodedUtf8(name_bytes);
   std::printf("seqtrak_name_probe: name (as text) = \"");
-  for (uint8_t b : name_bytes) {
-    std::putchar((b >= 0x20 && b < 0x7F) ? static_cast<char>(b) : '.');
+  for (uint8_t b : decoded_name) {
+    if (b == 0x00) break;
+    std::putchar(static_cast<char>(b));
   }
   std::printf("\"\n");
 

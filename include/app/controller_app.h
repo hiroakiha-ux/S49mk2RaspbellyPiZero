@@ -58,7 +58,15 @@ class ControllerApp {
   enum class ScreenId {
     kControllerHome,
     kSoundSelect,
+    kDrumSoundCategory,
+    kSynthSoundCategory,
+    kDxSoundCategory,
+    kSamplerSoundCategory,
+    kDrumKit,
+    kSoundList,
     kSettings,
+    kSeqtrakTrackSelect,
+    kFmEditor,
     kKeySplit,
     kSetCcPc,
     kMidiLog
@@ -85,7 +93,13 @@ class ControllerApp {
   void DrawStartupScreens();
   void DrawLeftLcdUi();
   void DrawControllerHome(mk2::LcdCanvas& canvas);
+  void DrawSoundDestination(mk2::LcdCanvas& canvas);
+  void DrawDrumKit(mk2::LcdCanvas& canvas);
+  void DrawVariationSummary(mk2::LcdCanvas& canvas);
+  void DrawSoundList(mk2::LcdCanvas& canvas, bool right_screen);
   void DrawSettings(mk2::LcdCanvas& canvas);
+  void DrawSeqtrakTrackSelect(mk2::LcdCanvas& canvas);
+  void DrawFmEditor(mk2::LcdCanvas& canvas, bool right_screen);
   void DrawKeySplit(mk2::LcdCanvas& canvas);
   void DrawSetCcPc(mk2::LcdCanvas& canvas, bool right_screen);
   void DrawMidiLog(mk2::LcdCanvas& canvas);
@@ -95,6 +109,12 @@ class ControllerApp {
   void ApplyPendingUiAction();
   void ActivateAction(ActionId action);
   void ReturnToControllerHome();
+  void OpenSelectedSoundDestination();
+  void ReturnToVariation();
+  bool ApplySelectedSound();
+  bool SendSoundPreset(int kind, uint16_t number, int channel,
+                       int drum_kit_part = -1);
+  bool ApplyAllTrackSounds();
   void AppendMidiLog(const mk2::MidiMessage& message);
   void ApplyPendingMidiLogRedraw();
   void ApplyPendingMidiControls();
@@ -111,9 +131,10 @@ class ControllerApp {
   bool LoadControlAssignments();
   bool SaveControlAssignments(
       const std::array<ControlAssignment, 17>& assignments);
+  bool SaveFmPatch();
   void NormalizeKeySplitRanges(KeySplitSettings& settings);
   void LoadDrumKeySplitPreset();
-  void LoadDrumSetKeySplitPreset();
+  void LoadDrumKitKeySplitPreset();
   std::vector<uint8_t> BuildKeySplitReport(
       const KeySplitSettings& settings) const;
   bool ApplyKeySplitSettings(const KeySplitSettings& settings);
@@ -130,6 +151,12 @@ class ControllerApp {
   ScreenId current_screen_ = ScreenId::kControllerHome;
   int selected_home_button_ = 0;
   int selected_settings_item_ = 0;
+  int selected_seqtrak_track_ = -1;  // -1=Prev., 0..10=track
+  int fm_page_ = 0;
+  int selected_fm_header_action_ = 1;  // 0=Prev., 1=Save
+  std::array<uint8_t, 28> fm_common_{};
+  std::array<std::array<uint8_t, 36>, 4> fm_operators_{};
+  std::string fm_status_;
   int selected_dialog_action_ = 0;
   std::array<ControlAssignment, 17> control_assignments_{};
   std::array<ControlAssignment, 17> edited_control_assignments_{};
@@ -147,6 +174,22 @@ class ControllerApp {
   int selected_key_split_zones_action_ = 0;
   LcdUiMode lcd_ui_mode_ = LcdUiMode::kTrackSelect;
   int selected_track_ = 0;
+  int selected_variation_item_ = 1;  // 0=Prev., 1..11=track, 12=OK
+  int selected_drum_kit_item_ = 0;   // 0=Prev., 1=Type, 2..8=parts, 9=OK
+  int selected_sound_category_item_ = 0;  // 0=Prev., 1..15=category
+  int selected_sound_kind_ = 0;  // 0=Drum, 1=Synth, 2=DX, 3=SAMPLER
+  int selected_sound_category_index_ = 0;
+  int selected_sound_list_item_ = -1;  // -1=Prev., 0..N-1=sound
+  bool sound_list_for_drum_kit_ = false;
+  int selected_drum_kit_part_ = 0;
+  std::array<std::string, 11> track_sound_names_{};
+  std::array<std::string, 11> track_sound_categories_{};
+  std::array<uint16_t, 11> track_sound_numbers_{};
+  std::array<int, 11> track_sound_kinds_ = {-1, -1, -1, -1, -1, -1,
+                                            -1, -1, -1, -1, -1};
+  std::array<std::string, 7> drum_kit_sound_names_{};
+  std::array<uint16_t, 7> drum_kit_sound_numbers_{};
+  std::string variation_status_;
   int selected_track_type_ = 0;
   std::array<int, 11> track_types_{};
   std::array<int, 11> track_volumes_ = {30, 30, 30, 30, 30, 30,
@@ -156,7 +199,9 @@ class ControllerApp {
   // report, so remember which physical knob most recently became active.
   int last_touched_knob_ = -1;
   std::chrono::steady_clock::time_point last_knob2_touch_{};
-  std::array<std::atomic<int>, 2> pending_knob_cc_{
+  std::array<std::atomic<int>, 8> pending_knob_cc_{
+      std::atomic<int>{-1}, std::atomic<int>{-1}, std::atomic<int>{-1},
+      std::atomic<int>{-1}, std::atomic<int>{-1}, std::atomic<int>{-1},
       std::atomic<int>{-1}, std::atomic<int>{-1}};
   std::atomic<int> pending_ui_action_{-1};
   std::mutex midi_log_mutex_;

@@ -6,8 +6,10 @@
 #include <string>
 
 #include "display/lcd_packet.h"
+#include "midi/seqtrak_sysex.h"
 #include "mk2_protocol.h"
 #include "seqtrak_protocol.h"
+#include "seqtrak_sound_data.h"
 #include "util/hex_dump.h"
 
 namespace mk2app {
@@ -22,7 +24,7 @@ namespace {
 // of that assignment, so the CC map here is what this bridge chooses to send
 // onward to SEQTRAK regardless of how the MK2's own assignment is set.
 constexpr int kControlChannel = mk2::kDefaultControlsMidiChannel;
-constexpr const char* kTrackTypeNames[] = {"Drum", "DrumKit", "Synth"};
+constexpr const char* kTrackTypeNames[] = {"Drum", "Drum Kit", "Synth"};
 constexpr int kVolumeMin = 0;
 constexpr int kVolumeMax = 100;
 constexpr int kPanMin = -50;
@@ -32,9 +34,49 @@ constexpr auto kKnobDoubleTouchMax = std::chrono::milliseconds(500);
 constexpr size_t kMidiLogCapacity = 11;
 constexpr const char* kControlAssignmentsPath =
     "s49mk2_control_assignments.conf";
+constexpr const char* kFmPatchPath = "seqtrak_dx_patch.json";
+
+struct FmPageSpec {
+  const char* title;
+  std::array<const char*, 8> labels;
+};
+
+constexpr std::array<FmPageSpec, 15> kFmPages = {{
+    {"DX FM > ALGORITHM", {"FEEDBACK", "LFO SPD", "LFO PMD", "ALGORITHM", "OP1 LVL", "OP2 LVL", "OP3 LVL", "OP4 LVL"}},
+    {"DX FM > OP1 > PITCH", {"ON/OFF", "FREQ MODE", "COARSE", "FINE", "DETUNE", "OUT LVL", "VEL SENS", "FEEDBACK"}},
+    {"DX FM > OP1 > EG", {"RATE 1", "RATE 2", "RATE 3", "RATE 4", "LEVEL 1", "LEVEL 2", "LEVEL 3", "LEVEL 4"}},
+    {"DX FM > OP1 > MOD", {"KB RATE SC", "KLS-L DEPTH", "KLS-L CURVE", "LFO AMD", "KLS-R DEPTH", "KLS-R CURVE", "LFO>PMD", "PEG ON/OFF"}},
+    {"DX FM > OP2 > PITCH", {"ON/OFF", "FREQ MODE", "COARSE", "FINE", "DETUNE", "OUT LVL", "VEL SENS", "FEEDBACK"}},
+    {"DX FM > OP2 > EG", {"RATE 1", "RATE 2", "RATE 3", "RATE 4", "LEVEL 1", "LEVEL 2", "LEVEL 3", "LEVEL 4"}},
+    {"DX FM > OP2 > MOD", {"KB RATE SC", "KLS-L DEPTH", "KLS-L CURVE", "LFO AMD", "KLS-R DEPTH", "KLS-R CURVE", "LFO>PMD", "PEG ON/OFF"}},
+    {"DX FM > OP3 > PITCH", {"ON/OFF", "FREQ MODE", "COARSE", "FINE", "DETUNE", "OUT LVL", "VEL SENS", "FEEDBACK"}},
+    {"DX FM > OP3 > EG", {"RATE 1", "RATE 2", "RATE 3", "RATE 4", "LEVEL 1", "LEVEL 2", "LEVEL 3", "LEVEL 4"}},
+    {"DX FM > OP3 > MOD", {"KB RATE SC", "KLS-L DEPTH", "KLS-L CURVE", "LFO AMD", "KLS-R DEPTH", "KLS-R CURVE", "LFO>PMD", "PEG ON/OFF"}},
+    {"DX FM > OP4 > PITCH", {"ON/OFF", "FREQ MODE", "COARSE", "FINE", "DETUNE", "OUT LVL", "VEL SENS", "FEEDBACK"}},
+    {"DX FM > OP4 > EG", {"RATE 1", "RATE 2", "RATE 3", "RATE 4", "LEVEL 1", "LEVEL 2", "LEVEL 3", "LEVEL 4"}},
+    {"DX FM > OP4 > MOD", {"KB RATE SC", "KLS-L DEPTH", "KLS-L CURVE", "LFO AMD", "KLS-R DEPTH", "KLS-R CURVE", "LFO>PMD", "PEG ON/OFF"}},
+    {"DX FM > COMMON > LFO", {"PB SENS", "LFO WAVE", "LFO SPEED", "LFO DELAY", "LFO PMD", "-", "-", "-"}},
+    {"DX FM > COMMON > PEG", {"PEG RATE1", "PEG RATE2", "PEG RATE3", "PEG RATE4", "PEG LVL1", "PEG LVL2", "PEG LVL3", "PEG LVL4"}},
+}};
 constexpr int kKeySplitFieldsPerZone = 4;
 constexpr int kKeySplitLowestNote = 24;    // C1
 constexpr int kKeySplitHighestNote = 127;  // G9
+
+constexpr std::array<const char*, 15> kDrumCategories = {
+    "Kick",          "Snare",  "Rim",   "Clap", "Snap",
+    "Closed HiHat",  "Open HiHat", "Shaker / Tambourine", "Ride", "Crash",
+    "Tom",           "Bell",   "Conga / Bongo", "World", "SFX"};
+constexpr std::array<const char*, 15> kSynthCategories = {
+    "Bass",    "Synth Lead", "Piano",    "Keyboard", "Organ",
+    "Pad",     "Strings",    "Brass",    "Woodwind", "Guitar",
+    "World",   "Mallet",     "Bell",     "Rhythmic", "SFX"};
+constexpr std::array<const char*, 15> kDxCategories = kSynthCategories;
+constexpr std::array<const char*, 15> kSamplerCategories = {
+    "Vocal Count", "Vocal Phrase / Chant", "Singing Vocal",
+    "Robotic Vocal / Effect", "Riser", "Laser / Sci-Fi", "Impact",
+    "Noise / Distorted Sound", "Ambient / Soundscape", "SFX", "Scratch",
+    "Nature / Animals", "Hit / Stab / Musical Instrument Sound",
+    "Percussion", "Recorded Sound"};
 
 struct ZoneColor {
   uint8_t r;
@@ -71,6 +113,103 @@ int WrappedDelta(int previous, int current, int modulo) {
   if (delta > modulo / 2) delta -= modulo;
   if (delta < -modulo / 2) delta += modulo;
   return delta;
+}
+
+void DrawLine(mk2::LcdCanvas& canvas, int x0, int y0, int x1, int y1,
+              uint8_t r, uint8_t g, uint8_t b) {
+  const int dx = std::abs(x1 - x0);
+  const int sx = x0 < x1 ? 1 : -1;
+  const int dy = -std::abs(y1 - y0);
+  const int sy = y0 < y1 ? 1 : -1;
+  int error = dx + dy;
+  while (true) {
+    canvas.FillRect(x0 - 1, y0 - 1, 3, 3, r, g, b);
+    if (x0 == x1 && y0 == y1) break;
+    const int twice_error = 2 * error;
+    if (twice_error >= dy) {
+      error += dy;
+      x0 += sx;
+    }
+    if (twice_error <= dx) {
+      error += dx;
+      y0 += sy;
+    }
+  }
+}
+
+std::vector<std::string> WrapCategoryLabel(const std::string& label) {
+  constexpr size_t kMaxCharsPerLine = 17;
+  std::vector<std::string> lines;
+  size_t start = 0;
+  while (start < label.size() && lines.size() < 3) {
+    size_t remaining = label.size() - start;
+    if (remaining <= kMaxCharsPerLine || lines.size() == 2) {
+      lines.push_back(label.substr(start));
+      break;
+    }
+    size_t split = label.rfind(' ', start + kMaxCharsPerLine);
+    if (split == std::string::npos || split < start) {
+      split = start + kMaxCharsPerLine;
+    }
+    lines.push_back(label.substr(start, split - start));
+    start = split;
+    while (start < label.size() && label[start] == ' ') ++start;
+  }
+  return lines;
+}
+
+std::string Ellipsize(const std::string& text, int max_width) {
+  if (mk2::LcdCanvas::MeasureUtf8Width(text, 1) <= max_width) return text;
+  std::string shortened = text;
+  while (!shortened.empty() &&
+         mk2::LcdCanvas::MeasureUtf8Width(shortened + "...", 1) > max_width) {
+    shortened.pop_back();
+  }
+  return shortened + "...";
+}
+
+const char* CategoryNameForKind(int kind, int index) {
+  index = std::clamp(index, 0, 14);
+  switch (kind) {
+    case 0:
+      return kDrumCategories[index];
+    case 1:
+      return kSynthCategories[index];
+    case 2:
+      return kDxCategories[index];
+    case 3:
+      return kSamplerCategories[index];
+    default:
+      return "";
+  }
+}
+
+std::vector<const seqtrak::SoundPreset*> FilteredSoundPresets(
+    int kind, int category_index) {
+  std::vector<const seqtrak::SoundPreset*> result;
+  const std::string category = CategoryNameForKind(kind, category_index);
+  const auto append_matches = [&result, &category](const auto& presets) {
+    for (const auto& preset : presets) {
+      if (preset.category == category) result.push_back(&preset);
+    }
+  };
+  switch (kind) {
+    case 0:
+      append_matches(seqtrak::kDrumSoundPresets);
+      break;
+    case 1:
+      append_matches(seqtrak::kSynthSoundPresets);
+      break;
+    case 2:
+      append_matches(seqtrak::kDXSoundPresets);
+      break;
+    case 3:
+      append_matches(seqtrak::kSamplerSoundPresets);
+      break;
+    default:
+      break;
+  }
+  return result;
 }
 
 void FillRoundedRect(mk2::LcdCanvas& canvas, int x, int y, int w, int h,
@@ -278,7 +417,10 @@ void ControllerApp::DrawLeftLcdUi() {
   mk2::LcdCanvas left;
   left.Clear(0, 0, 0);
 
-  if (current_screen_ != ScreenId::kSetCcPc && right_lcd_has_ui_) {
+  if (current_screen_ != ScreenId::kSetCcPc &&
+      current_screen_ != ScreenId::kSoundSelect &&
+      current_screen_ != ScreenId::kSoundList &&
+      current_screen_ != ScreenId::kFmEditor && right_lcd_has_ui_) {
     mk2::LcdCanvas blank_right;
     blank_right.Clear(0, 0, 0);
     SendOrPreviewLcdPacket(
@@ -305,6 +447,24 @@ void ControllerApp::DrawLeftLcdUi() {
                            mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
     return;
   }
+  if (current_screen_ == ScreenId::kSeqtrakTrackSelect) {
+    DrawSeqtrakTrackSelect(left);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    return;
+  }
+  if (current_screen_ == ScreenId::kFmEditor) {
+    mk2::LcdCanvas right;
+    right.Clear(0, 0, 0);
+    DrawFmEditor(left, false);
+    DrawFmEditor(right, true);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "right",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenRight, right));
+    right_lcd_has_ui_ = true;
+    return;
+  }
   if (current_screen_ == ScreenId::kKeySplit) {
     DrawKeySplit(left);
     SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
@@ -323,11 +483,60 @@ void ControllerApp::DrawLeftLcdUi() {
     right_lcd_has_ui_ = true;
     return;
   }
+  if (current_screen_ == ScreenId::kSoundList) {
+    mk2::LcdCanvas right;
+    right.Clear(0, 0, 0);
+    DrawSoundList(left, false);
+    DrawSoundList(right, true);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "right",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenRight, right));
+    right_lcd_has_ui_ = true;
+    return;
+  }
+  if (current_screen_ == ScreenId::kDrumSoundCategory ||
+      current_screen_ == ScreenId::kSynthSoundCategory ||
+      current_screen_ == ScreenId::kDxSoundCategory ||
+      current_screen_ == ScreenId::kSamplerSoundCategory ||
+      current_screen_ == ScreenId::kDrumKit) {
+    if (current_screen_ == ScreenId::kDrumKit) {
+      DrawDrumKit(left);
+    } else {
+      DrawSoundDestination(left);
+    }
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    return;
+  }
+
+  // Variation 01 header. Prev. participates in jog selection while the
+  // track row is active; Track Type selection keeps focus on its options.
+  const bool prev_selected = lcd_ui_mode_ == LcdUiMode::kTrackSelect &&
+                             selected_variation_item_ == 0;
+  left.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  FillRoundedRect(left, 8, 4, 64, 20, 3, prev_selected ? 0 : 32,
+                  prev_selected ? 215 : 42, prev_selected ? 255 : 51);
+  DrawShinonomeText(left, 20, 6, "Prev.", prev_selected ? 6 : 170,
+                    prev_selected ? 16 : 179, prev_selected ? 20 : 192);
+  const std::string variation_title = "Variation 01";
+  const int variation_title_width =
+      mk2::LcdCanvas::MeasureUtf8Width(variation_title, 1);
+  DrawShinonomeText(left, (mk2::kLcdWidth - variation_title_width) / 2, 6,
+                    variation_title, 244, 247, 250);
+  const bool variation_ok_selected = selected_variation_item_ == 12;
+  FillRoundedRect(left, 420, 4, 48, 20, 3,
+                  variation_ok_selected ? 0 : 32,
+                  variation_ok_selected ? 215 : 42,
+                  variation_ok_selected ? 255 : 51);
+  DrawShinonomeText(left, 434, 6, "OK", variation_ok_selected ? 6 : 170,
+                    variation_ok_selected ? 16 : 179,
+                    variation_ok_selected ? 20 : 192);
 
   constexpr int kGap = 6;
   constexpr int kButtonHeight = 32;
   constexpr int kPaddingX = 12;
-  constexpr int kRowY[] = {10, 50};
+  constexpr int kRowY[] = {36, 76};
   constexpr int kRowStart[] = {0, 6};
   constexpr int kRowEnd[] = {6, 11};
 
@@ -343,7 +552,8 @@ void ControllerApp::DrawLeftLcdUi() {
     for (int i = kRowStart[row]; i < kRowEnd[row]; ++i) {
       const std::string name = seqtrak::kTracks[i].name;
       int width = mk2::LcdCanvas::MeasureUtf8Width(name, 1) + 2 * kPaddingX;
-      bool selected = i == selected_track_;
+      bool selected = selected_variation_item_ >= 1 &&
+                      selected_variation_item_ <= 11 && i == selected_track_;
       FillRoundedRect(left, x, kRowY[row], width, kButtonHeight, 6,
                       selected ? 242 : 27, selected ? 184 : 32,
                       selected ? 75 : 40);
@@ -376,38 +586,224 @@ void ControllerApp::DrawLeftLcdUi() {
       }
     }
 
-    const int volume = track_volumes_[selected_track_];
-    DrawShinonomeText(left, 12, 157, "Volume", 244, 247, 250);
-    DrawShinonomeText(left, 96, 157, "0", 170, 179, 192);
-    FillRoundedRect(left, 112, 160, 300, 10, 5, 37, 43, 52);
-    FillRoundedRect(left, 112, 160, 3 * volume, 10, 5, 79, 195, 247);
-    int volume_x = 112 + 3 * volume;
-    FillRoundedRect(left, volume_x - 4, 155, 8, 20, 3, 234, 248, 255);
-    DrawShinonomeText(left, 420, 157, "100", 170, 179, 192);
-    DrawShinonomeText(left, std::clamp(volume_x - 12, 112, 388), 136,
-                      std::to_string(volume) + "%", 79, 195, 247);
-
-    const int pan = track_pans_[selected_track_];
-    DrawShinonomeText(left, 12, 213, "Pan", 244, 247, 250);
-    DrawShinonomeText(left, 96, 213, "L", 170, 179, 192);
-    FillRoundedRect(left, 112, 216, 300, 10, 5, 37, 43, 52);
-    int pan_x = 262 + (pan * 150) / kPanMax;
-    left.FillRect(260, 216, 4, 10, 79, 195, 247);
-    if (pan < 0) {
-      left.FillRect(pan_x, 216, 262 - pan_x, 10, 79, 195, 247);
-    } else if (pan > 0) {
-      left.FillRect(262, 216, pan_x - 262, 10, 79, 195, 247);
-    }
-    FillRoundedRect(left, pan_x - 6, 211, 12, 20, 4, 234, 248, 255);
-    DrawShinonomeText(left, 424, 213, "R", 170, 179, 192);
-    const std::string pan_text =
-        pan > 0 ? "+" + std::to_string(pan) : std::to_string(pan);
-    DrawShinonomeText(left, std::clamp(pan_x - 12, 112, 388), 192,
-                      pan_text, 79, 195, 247);
+    const std::string category = track_sound_categories_[selected_track_].empty()
+                                     ? "--"
+                                     : track_sound_categories_[selected_track_];
+    const std::string sound = track_sound_names_[selected_track_].empty()
+                                  ? "--"
+                                  : track_sound_names_[selected_track_];
+    DrawShinonomeText(left, 12, 160, "Category: " + category, 79, 195, 247);
+    DrawShinonomeText(left, 12, 194, "Sound: " + sound, 244, 247, 250);
+  }
+  if (!variation_status_.empty()) {
+    DrawShinonomeText(left, 12, 240, variation_status_, 72, 213, 151);
   }
 
   SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
                          mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+  mk2::LcdCanvas right;
+  right.Clear(0, 0, 0);
+  DrawVariationSummary(right);
+  SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "right",
+                         mk2::BuildLcdPacket(mk2::kLcdScreenRight, right));
+  right_lcd_has_ui_ = true;
+}
+
+void ControllerApp::DrawSoundDestination(mk2::LcdCanvas& canvas) {
+  const char* title = "Sound Category";
+  const std::array<const char*, 15>* categories = &kDrumCategories;
+  switch (current_screen_) {
+    case ScreenId::kDrumSoundCategory:
+      title = "Drum Sound Category";
+      categories = &kDrumCategories;
+      break;
+    case ScreenId::kSynthSoundCategory:
+      title = "Synth Sound Category";
+      categories = &kSynthCategories;
+      break;
+    case ScreenId::kDxSoundCategory:
+      title = "DX Sound Category";
+      categories = &kDxCategories;
+      break;
+    case ScreenId::kSamplerSoundCategory:
+      title = "SAMPLER Sound Category";
+      categories = &kSamplerCategories;
+      break;
+    default:
+      break;
+  }
+
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  FillRoundedRect(canvas, 8, 4, 64, 20, 3, 0, 215, 255);
+  DrawShinonomeText(canvas, 20, 6, "Prev.", 6, 16, 20);
+  const int title_width = mk2::LcdCanvas::MeasureUtf8Width(title, 1);
+  DrawShinonomeText(canvas, (mk2::kLcdWidth - title_width) / 2, 6, title,
+                    244, 247, 250);
+  constexpr int kButtonWidth = 148;
+  constexpr int kButtonHeight = 39;
+  constexpr int kGapX = 8;
+  constexpr int kGapY = 4;
+  for (int index = 0; index < 15; ++index) {
+    const int row = index / 3;
+    const int column = index % 3;
+    const int x = 10 + column * (kButtonWidth + kGapX);
+    const int y = 34 + row * (kButtonHeight + kGapY);
+    const bool selected = selected_sound_category_item_ == index + 1;
+    FillRoundedRect(canvas, x, y, kButtonWidth, kButtonHeight, 3,
+                    selected ? 0 : 32, selected ? 215 : 42,
+                    selected ? 255 : 51);
+    canvas.DrawRect(x, y, kButtonWidth, kButtonHeight,
+                    selected ? 184 : 82, selected ? 245 : 97,
+                    selected ? 255 : 109);
+
+    const auto lines = WrapCategoryLabel((*categories)[index]);
+    const int first_y = y + (kButtonHeight - static_cast<int>(lines.size()) *
+                                                12) /
+                                2;
+    for (size_t line = 0; line < lines.size(); ++line) {
+      const int line_width =
+          mk2::LcdCanvas::MeasureUtf8Width(lines[line], 1);
+      DrawShinonomeText(canvas, x + (kButtonWidth - line_width) / 2,
+                        first_y + static_cast<int>(line) * 12, lines[line],
+                        selected ? 6 : 242, selected ? 16 : 247,
+                        selected ? 20 : 250);
+    }
+  }
+}
+
+void ControllerApp::DrawDrumKit(mk2::LcdCanvas& canvas) {
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  const bool prev_selected = selected_drum_kit_item_ == 0;
+  FillRoundedRect(canvas, 8, 4, 64, 20, 3, prev_selected ? 0 : 32,
+                  prev_selected ? 215 : 42, prev_selected ? 255 : 51);
+  DrawShinonomeText(canvas, 20, 6, "Prev.", prev_selected ? 6 : 170,
+                    prev_selected ? 16 : 179, prev_selected ? 20 : 192);
+  const std::string title = "Drum Kit";
+  const int title_width = mk2::LcdCanvas::MeasureUtf8Width(title, 1);
+  DrawShinonomeText(canvas, (mk2::kLcdWidth - title_width) / 2, 6, title,
+                    244, 247, 250);
+  const bool ok_selected = selected_drum_kit_item_ == 9;
+  FillRoundedRect(canvas, 420, 4, 48, 20, 3, ok_selected ? 0 : 32,
+                  ok_selected ? 215 : 42, ok_selected ? 255 : 51);
+  DrawShinonomeText(canvas, 434, 6, "OK", ok_selected ? 6 : 170,
+                    ok_selected ? 16 : 179, ok_selected ? 20 : 192);
+
+  constexpr const char* kLabels[] = {
+      "Type", "KICK", "SNARE", "CLAP", "HAT 1", "HAT 2", "PERC 1",
+      "PERC 2"};
+  constexpr int kButtonX[] = {12, 126, 240, 354, 12, 126, 240, 354};
+  constexpr int kButtonY[] = {48, 48, 48, 48, 112, 112, 112, 112};
+  constexpr int kButtonWidth = 102;
+  constexpr int kButtonHeight = 48;
+  for (int i = 0; i < 8; ++i) {
+    const bool selected = selected_drum_kit_item_ == i + 1;
+    FillRoundedRect(canvas, kButtonX[i], kButtonY[i], kButtonWidth,
+                    kButtonHeight, 4, selected ? 0 : 32,
+                    selected ? 215 : 42, selected ? 255 : 51);
+    canvas.DrawRect(kButtonX[i], kButtonY[i], kButtonWidth, kButtonHeight,
+                    selected ? 184 : 82, selected ? 245 : 97,
+                    selected ? 255 : 109);
+    const int label_width = mk2::LcdCanvas::MeasureUtf8Width(kLabels[i], 1);
+    const int label_y = i == 0 ? kButtonY[i] + 17 : kButtonY[i] + 5;
+    DrawShinonomeText(canvas,
+                      kButtonX[i] + (kButtonWidth - label_width) / 2,
+                      label_y, kLabels[i], selected ? 6 : 242,
+                      selected ? 16 : 247, selected ? 20 : 250);
+    if (i > 0) {
+      const std::string sound = drum_kit_sound_names_[i - 1].empty()
+                                    ? "--"
+                                    : drum_kit_sound_names_[i - 1];
+      const std::string short_sound = Ellipsize(sound, kButtonWidth - 8);
+      const int sound_width =
+          mk2::LcdCanvas::MeasureUtf8Width(short_sound, 1);
+      DrawShinonomeText(canvas,
+                        kButtonX[i] + (kButtonWidth - sound_width) / 2,
+                        kButtonY[i] + 25, short_sound,
+                        selected ? 6 : 170, selected ? 16 : 179,
+                        selected ? 20 : 192);
+    }
+  }
+
+  canvas.DrawRect(12, 180, 444, 68, 82, 97, 109);
+  const int part_index = std::clamp(selected_drum_kit_item_ - 2, 0, 6);
+  std::string selected_part = "Select Type or Part";
+  if (selected_drum_kit_item_ == 1) {
+    selected_part = "Type: Drum Kit";
+  } else if (selected_drum_kit_item_ >= 2 && selected_drum_kit_item_ <= 8) {
+    selected_part = "Part: " + std::string(kLabels[part_index + 1]);
+  } else if (selected_drum_kit_item_ == 9) {
+    selected_part = "Confirm Drum Kit";
+  }
+  DrawShinonomeText(canvas, 24, 194, selected_part, 244, 247, 250);
+  DrawShinonomeText(canvas, 24, 222, "Vol:100", 79, 195, 247);
+  DrawShinonomeText(canvas, 180, 222, "Pan:0", 79, 195, 247);
+}
+
+void ControllerApp::DrawVariationSummary(mk2::LcdCanvas& canvas) {
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  DrawShinonomeText(canvas, 12, 6, "TRACK", 170, 179, 192);
+  DrawShinonomeText(canvas, 92, 6, "CATEGORY", 170, 179, 192);
+  DrawShinonomeText(canvas, 244, 6, "SOUND", 170, 179, 192);
+  for (int track = 0; track < 11; ++track) {
+    const int y = 34 + track * 21;
+    const bool selected = selected_variation_item_ >= 1 &&
+                          selected_variation_item_ <= 11 &&
+                          selected_track_ == track;
+    if (selected) canvas.FillRect(6, y - 2, 468, 19, 37, 73, 88);
+    const std::string category = track_sound_categories_[track].empty()
+                                     ? "--"
+                                     : track_sound_categories_[track];
+    const std::string sound =
+        track_sound_names_[track].empty() ? "--" : track_sound_names_[track];
+    DrawShinonomeText(canvas, 12, y, seqtrak::kTracks[track].name,
+                      selected ? 234 : 244, selected ? 248 : 247,
+                      selected ? 255 : 250);
+    DrawShinonomeText(canvas, 92, y, Ellipsize(category, 140), 79, 195, 247);
+    DrawShinonomeText(canvas, 244, y, Ellipsize(sound, 224), 244, 247, 250);
+  }
+}
+
+void ControllerApp::DrawSoundList(mk2::LcdCanvas& canvas,
+                                  bool right_screen) {
+  const auto sounds = FilteredSoundPresets(selected_sound_kind_,
+                                           selected_sound_category_index_);
+  const int selected = std::max(selected_sound_list_item_, 0);
+  const int page = selected / 20;
+  const int base = page * 20 + (right_screen ? 10 : 0);
+
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  if (!right_screen) {
+    const bool prev_selected = selected_sound_list_item_ == -1;
+    FillRoundedRect(canvas, 8, 4, 64, 20, 3, prev_selected ? 0 : 32,
+                    prev_selected ? 215 : 42, prev_selected ? 255 : 51);
+    DrawShinonomeText(canvas, 20, 6, "Prev.", prev_selected ? 6 : 170,
+                      prev_selected ? 16 : 179, prev_selected ? 20 : 192);
+    DrawShinonomeText(canvas, 92, 6, "Sound List", 244, 247, 250);
+  } else {
+    const std::string category = CategoryNameForKind(
+        selected_sound_kind_, selected_sound_category_index_);
+    DrawShinonomeText(canvas, 12, 6, Ellipsize(category, 340), 244, 247, 250);
+  }
+  const std::string page_text = std::to_string(page + 1) + "/" +
+                                std::to_string(std::max(
+                                    1, (static_cast<int>(sounds.size()) + 19) /
+                                           20));
+  DrawShinonomeText(canvas, 414, 6, page_text, 170, 179, 192);
+
+  for (int row = 0; row < 10; ++row) {
+    const int index = base + row;
+    if (index >= static_cast<int>(sounds.size())) break;
+    const int y = 38 + row * 22;
+    const bool row_selected = selected_sound_list_item_ == index;
+    if (row_selected) canvas.FillRect(8, y - 2, 456, 19, 37, 73, 88);
+    char number[8];
+    std::snprintf(number, sizeof(number), "%04d", sounds[index]->number);
+    DrawShinonomeText(canvas, 14, y, number, 170, 179, 192);
+    DrawShinonomeText(canvas, 66, y, Ellipsize(sounds[index]->name, 390),
+                      row_selected ? 234 : 244,
+                      row_selected ? 248 : 247,
+                      row_selected ? 255 : 250);
+  }
 }
 
 void ControllerApp::DrawControllerHome(mk2::LcdCanvas& canvas) {
@@ -510,7 +906,7 @@ void ControllerApp::DrawSettings(mk2::LcdCanvas& canvas) {
                     244, 247, 250);
 
   constexpr const char* kLabels[] = {
-      "S49MK2", "Key Split", "Set CC", "SERTRAK", "Controller"};
+      "S49MK2", "Key Split", "Set CC", "SEQTRAK", "Controller"};
   constexpr int kButtonX[] = {12, 168, 324, 90, 246};
   constexpr int kButtonY[] = {50, 50, 50, 136, 136};
   constexpr int kButtonWidth = 144;
@@ -530,6 +926,234 @@ void ControllerApp::DrawSettings(mk2::LcdCanvas& canvas) {
                       kButtonY[i] + 25, kLabels[i], selected ? 6 : 242,
                       selected ? 16 : 247, selected ? 20 : 249);
   }
+}
+
+void ControllerApp::DrawSeqtrakTrackSelect(mk2::LcdCanvas& canvas) {
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  const bool prev = selected_seqtrak_track_ < 0;
+  FillRoundedRect(canvas, 8, 4, 64, 20, 3, prev ? 0 : 32,
+                  prev ? 215 : 42, prev ? 255 : 51);
+  DrawShinonomeText(canvas, 20, 6, "Prev.", prev ? 6 : 170,
+                    prev ? 16 : 179, prev ? 20 : 192);
+  const std::string title = "TRACK SELECT";
+  DrawShinonomeText(canvas,
+                    (mk2::kLcdWidth - mk2::LcdCanvas::MeasureUtf8Width(title, 1)) / 2,
+                    6, title, 244, 247, 250);
+  for (int i = 0; i < static_cast<int>(seqtrak::kTrackCount); ++i) {
+    const int row = i / 6;
+    const int col = i % 6;
+    const int x = 8 + col * 78;
+    const int y = 48 + row * 74;
+    const bool selected = selected_seqtrak_track_ == i;
+    FillRoundedRect(canvas, x, y, 70, 54, 4, selected ? 0 : 32,
+                    selected ? 215 : 42, selected ? 255 : 51);
+    DrawShinonomeText(canvas, x + 8, y + 20, seqtrak::kTracks[i].name,
+                      selected ? 6 : 242, selected ? 16 : 247,
+                      selected ? 20 : 249);
+  }
+  DrawShinonomeText(canvas, 12, 216,
+                    selected_seqtrak_track_ == 9
+                        ? "Press: open FM Editor"
+                        : "Select a SEQTRAK track",
+                    130, 147, 160);
+}
+
+void ControllerApp::DrawFmEditor(mk2::LcdCanvas& canvas, bool right_screen) {
+  const auto& page = kFmPages[fm_page_];
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  if (!right_screen) {
+    const bool prev = selected_fm_header_action_ == 0;
+    FillRoundedRect(canvas, 8, 4, 72, 20, 3, prev ? 0 : 32,
+                    prev ? 215 : 42, prev ? 255 : 51);
+    DrawShinonomeText(canvas, 14, 6, "<PREV", prev ? 6 : 170,
+                      prev ? 16 : 179, prev ? 20 : 192);
+    if (fm_page_ == 0) {
+      const bool save = selected_fm_header_action_ == 1;
+      FillRoundedRect(canvas, 400, 4, 68, 20, 3, save ? 0 : 32,
+                      save ? 215 : 42, save ? 255 : 51);
+      DrawShinonomeText(canvas, 412, 6, "Save", save ? 6 : 170,
+                        save ? 16 : 179, save ? 20 : 192);
+    }
+    DrawShinonomeText(canvas, 104, 6, page.title, 244, 247, 250);
+  } else {
+    DrawShinonomeText(canvas, 8, 6, "DX:FM EDITOR", 244, 247, 250);
+    DrawShinonomeText(canvas, 370, 6,
+                      std::to_string(fm_page_ + 1) + "/15", 170, 179, 192);
+  }
+
+  // L01 has its own Penpot layout: an FM routing diagram on the left LCD,
+  // not the generic four-parameter columns used by the remaining pages.
+  if (fm_page_ == 0 && !right_screen) {
+    const int algorithm = fm_common_[3] % 12;
+    char algorithm_text[24];
+    std::snprintf(algorithm_text, sizeof(algorithm_text), "ALGORITHM  %02d/12",
+                  algorithm + 1);
+    const int title_width =
+        mk2::LcdCanvas::MeasureUtf8Width(algorithm_text, 1);
+    DrawShinonomeText(canvas, (mk2::kLcdWidth - title_width) / 2, 40,
+                      algorithm_text, 255, 145, 45);
+
+    // Each entry says where OP1..OP4 feeds: -1=OUTPUT, 0..3=another OP.
+    // The twelve routings deliberately use the same four fixed operator
+    // positions as the Penpot board while changing the connecting graph.
+    constexpr int kRoutes[12][4] = {
+        {-1, 0, 1, 2}, {-1, -1, 0, 1}, {-1, 0, -1, 2},
+        {-1, 0, 0, 2}, {-1, -1, 1, 2}, {-1, 0, -1, 1},
+        {-1, -1, 0, 2}, {-1, -1, -1, 0}, {-1, 0, 1, -1},
+        {-1, -1, 1, -1}, {-1, 0, -1, -1}, {-1, -1, -1, -1}};
+    constexpr int kOpX[4] = {304, 64, 304, 64};
+    constexpr int kOpY[4] = {132, 132, 68, 68};
+    constexpr int kBoxW = 112;
+    constexpr int kBoxH = 40;
+    constexpr int kOutputY = 208;
+
+    // Connections go behind operator boxes. Elbows keep every route legible
+    // in the LCD's compact 480x272 coordinate space.
+    for (int source = 0; source < 4; ++source) {
+      const int sx = kOpX[source] + kBoxW / 2;
+      const int sy = kOpY[source] + kBoxH;
+      const int target = kRoutes[algorithm][source];
+      if (target < 0) {
+        canvas.FillRect(sx, sy, 2, kOutputY - sy, 255, 145, 45);
+      } else {
+        const int tx = kOpX[target] + kBoxW / 2;
+        const int ty = kOpY[target];
+        const int elbow_y = sy + std::max(2, (ty - sy) / 2);
+        canvas.FillRect(sx, sy, 2, std::max(2, elbow_y - sy), 255, 145, 45);
+        canvas.FillRect(std::min(sx, tx), elbow_y,
+                        std::max(2, std::abs(tx - sx) + 2), 2,
+                        255, 145, 45);
+        canvas.FillRect(tx, elbow_y, 2, std::max(2, ty - elbow_y),
+                        255, 145, 45);
+      }
+    }
+
+    for (int op = 0; op < 4; ++op) {
+      canvas.FillRect(kOpX[op], kOpY[op], kBoxW, kBoxH, 27, 32, 40);
+      canvas.DrawRect(kOpX[op], kOpY[op], kBoxW, kBoxH,
+                      op < 2 ? 255 : 130, op < 2 ? 145 : 147,
+                      op < 2 ? 45 : 160);
+      const std::string label = "OP" + std::to_string(op + 1);
+      DrawShinonomeText(
+          canvas,
+          kOpX[op] +
+              (kBoxW - mk2::LcdCanvas::MeasureUtf8Width(label, 1)) / 2,
+          kOpY[op] + 13, label, op < 2 ? 255 : 244,
+          op < 2 ? 145 : 247, op < 2 ? 45 : 250);
+    }
+    FillRoundedRect(canvas, 148, 58, 30, 18, 2, 38, 208, 161);
+    DrawShinonomeText(canvas, 154, 60, "FB", 6, 16, 20);
+    canvas.DrawRect(40, kOutputY, 400, 16, 255, 145, 45);
+    DrawShinonomeText(canvas, 214, kOutputY + 2, "OUTPUT", 255, 145, 45);
+
+    constexpr const char* kMiniLabels[] = {"FEEDBACK", "LFO SPD", "LFO PMD"};
+    constexpr int kMiniIndex[] = {0, 1, 2};
+    constexpr int kMiniX[] = {0, 160, 320};
+    for (int i = 0; i < 3; ++i) {
+      if (i > 0) canvas.FillRect(kMiniX[i], 232, 1, 40, 55, 65, 81);
+      DrawShinonomeText(canvas, kMiniX[i] + 12, 234, kMiniLabels[i],
+                        170, 179, 192);
+      DrawShinonomeText(canvas, kMiniX[i] + 68, 252,
+                        std::to_string(fm_common_[kMiniIndex[i]]),
+                        255, 145, 45);
+    }
+    if (!fm_status_.empty())
+      DrawShinonomeText(canvas, 260, 252, fm_status_, 72, 213, 151);
+    return;
+  }
+
+  const bool is_operator_eg =
+      fm_page_ == 2 || fm_page_ == 5 || fm_page_ == 8 || fm_page_ == 11;
+  const bool is_common_peg = fm_page_ == 14;
+  if (is_operator_eg || is_common_peg) {
+    std::array<int, 8> envelope{};
+    if (is_operator_eg) {
+      const int op = (fm_page_ - 2) / 3;
+      for (int i = 0; i < 8; ++i)
+        envelope[i] = fm_operators_[op][8 + i];
+    } else {
+      for (int i = 0; i < 8; ++i) envelope[i] = fm_common_[16 + i];
+    }
+
+    constexpr int kGraphLeft = 20;
+    constexpr int kGraphRight = 460;
+    constexpr int kGraphTop = 42;
+    constexpr int kGraphBottom = 166;
+    canvas.DrawRect(kGraphLeft, kGraphTop, kGraphRight - kGraphLeft,
+                    kGraphBottom - kGraphTop, 82, 97, 109);
+    for (int grid = 1; grid < 4; ++grid) {
+      const int y = kGraphTop + grid * (kGraphBottom - kGraphTop) / 4;
+      for (int x = kGraphLeft + 2; x < kGraphRight - 2; x += 8)
+        canvas.FillRect(x, y, 3, 1, 55, 65, 81);
+    }
+
+    // A larger RATE reaches the next level faster. Normalize all four
+    // segments so the complete envelope always fits the graph width.
+    std::array<int, 4> duration{};
+    int duration_sum = 0;
+    for (int i = 0; i < 4; ++i) {
+      duration[i] = std::max(8, 135 - envelope[i]);
+      duration_sum += duration[i];
+    }
+    std::array<int, 5> px{};
+    std::array<int, 5> py{};
+    px[0] = kGraphLeft + 2;
+    py[0] = kGraphBottom - 2;
+    int accumulated = 0;
+    for (int point = 1; point <= 4; ++point) {
+      accumulated += duration[point - 1];
+      px[point] = kGraphLeft + 2 +
+                  accumulated * (kGraphRight - kGraphLeft - 4) /
+                      duration_sum;
+      py[point] = kGraphBottom - 2 -
+                  envelope[3 + point] * (kGraphBottom - kGraphTop - 4) / 127;
+      DrawLine(canvas, px[point - 1], py[point - 1], px[point], py[point],
+               0, 215, 255);
+      canvas.FillRect(px[point] - 3, py[point] - 3, 7, 7, 255, 145, 45);
+    }
+
+    const int first_parameter = right_screen ? 4 : 0;
+    for (int col = 0; col < 4; ++col) {
+      const int parameter = first_parameter + col;
+      const int x = col * 120;
+      if (col > 0) canvas.FillRect(x, 178, 1, 86, 55, 65, 81);
+      DrawShinonomeText(canvas, x + 10, 182, page.labels[parameter],
+                        170, 179, 192);
+      const std::string value = std::to_string(envelope[parameter]);
+      DrawShinonomeText(
+          canvas,
+          x + (120 - mk2::LcdCanvas::MeasureUtf8Width(value, 1)) / 2,
+          214, value, 244, 247, 250);
+      DrawShinonomeText(canvas, x + 38, 242, "0-127", 130, 147, 160);
+    }
+    if (!fm_status_.empty())
+      DrawShinonomeText(canvas, 300, 246, fm_status_, 72, 213, 151);
+    return;
+  }
+
+  for (int col = 0; col < 4; ++col) {
+    const int parameter = (right_screen ? 4 : 0) + col;
+    const char* label = page.labels[parameter];
+    int value = 0;
+    if (fm_page_ == 0) value = fm_common_[parameter];
+    else if (fm_page_ <= 12) {
+      const int op = (fm_page_ - 1) / 3;
+      const int group = (fm_page_ - 1) % 3;
+      value = fm_operators_[op][group * 8 + parameter];
+    } else {
+      value = fm_common_[(fm_page_ == 13 ? 8 : 16) + parameter];
+    }
+    const int x = col * 120;
+    if (col > 0) canvas.FillRect(x, 32, 1, 232, 55, 65, 81);
+    DrawShinonomeText(canvas, x + 10, 48, label, 170, 179, 192);
+    canvas.FillRect(x + 14, 92, 92, 12, 37, 43, 52);
+    canvas.FillRect(x + 14, 92, value * 92 / 127, 12, 0, 215, 255);
+    DrawShinonomeText(canvas, x + 48, 132, std::to_string(value),
+                      244, 247, 250);
+    DrawShinonomeText(canvas, x + 38, 190, "0-127", 130, 147, 160);
+  }
+  if (!fm_status_.empty())
+    DrawShinonomeText(canvas, 12, 246, fm_status_, 72, 213, 151);
 }
 
 void ControllerApp::DrawKeySplit(mk2::LcdCanvas& canvas) {
@@ -558,7 +1182,7 @@ void ControllerApp::DrawKeySplit(mk2::LcdCanvas& canvas) {
                     zones_selected ? 79 : 244, zones_selected ? 195 : 247,
                     zones_selected ? 247 : 250);
 
-  constexpr const char* kPresetLabels[] = {"Drum", "DrumSet"};
+  constexpr const char* kPresetLabels[] = {"Drum", "Drum Kit"};
   constexpr int kPresetX[] = {144, 224};
   constexpr int kPresetWidth[] = {68, 92};
   for (int i = 0; i < 2; ++i) {
@@ -752,7 +1376,7 @@ void ControllerApp::OnMk2MidiMessage(const mk2::MidiMessage& message) {
 
   if (message.kind == mk2::MidiMessageKind::kControlChange) {
     const int knob = message.data1 - mk2::kDefaultKnobCcBase;
-    if (knob >= 0 && knob < 2) {
+    if (knob >= 0 && knob < 8) {
       std::fprintf(stderr,
                    "controller_app: MIDI Knob%d CC=0x%02x value=%d\n",
                    knob + 1, message.data1, message.data2);
@@ -792,6 +1416,8 @@ void ControllerApp::ActivateAction(ActionId action) {
     case ActionId::kSoundSelect:
       current_screen_ = ScreenId::kSoundSelect;
       lcd_ui_mode_ = LcdUiMode::kTrackSelect;
+      selected_variation_item_ = selected_track_ + 1;
+      variation_status_.clear();
       std::fprintf(stderr, "controller_app: screen -> Sound Select\n");
       break;
     case ActionId::kSetting:
@@ -807,6 +1433,125 @@ void ControllerApp::ReturnToControllerHome() {
   current_screen_ = ScreenId::kControllerHome;
   selected_home_button_ = 0;
   std::fprintf(stderr, "controller_app: screen -> Controller Home\n");
+}
+
+void ControllerApp::OpenSelectedSoundDestination() {
+  selected_sound_category_item_ = 0;
+  sound_list_for_drum_kit_ = false;
+  if (selected_track_ == 9) {
+    current_screen_ = ScreenId::kDxSoundCategory;
+  } else if (selected_track_ == 10) {
+    current_screen_ = ScreenId::kSamplerSoundCategory;
+  } else {
+    switch (track_types_[selected_track_]) {
+      case 0:
+        current_screen_ = ScreenId::kDrumSoundCategory;
+        break;
+      case 1:
+        current_screen_ = ScreenId::kDrumKit;
+        selected_drum_kit_item_ = 0;
+        break;
+      case 2:
+        current_screen_ = ScreenId::kSynthSoundCategory;
+        break;
+      default:
+        return;
+    }
+  }
+  std::fprintf(stderr, "controller_app: Variation 01 -> sound screen %d\n",
+               static_cast<int>(current_screen_));
+}
+
+void ControllerApp::ReturnToVariation() {
+  current_screen_ = ScreenId::kSoundSelect;
+  lcd_ui_mode_ = LcdUiMode::kTrackSelect;
+  selected_variation_item_ = selected_track_ + 1;
+  std::fprintf(stderr, "controller_app: sound screen -> Variation 01\n");
+}
+
+bool ControllerApp::ApplySelectedSound() {
+  const auto sounds = FilteredSoundPresets(selected_sound_kind_,
+                                           selected_sound_category_index_);
+  if (selected_sound_list_item_ < 0 ||
+      selected_sound_list_item_ >= static_cast<int>(sounds.size())) {
+    return false;
+  }
+  const auto& sound = *sounds[selected_sound_list_item_];
+  const int channel = sound_list_for_drum_kit_
+                          ? selected_drum_kit_part_ + 1
+                          : seqtrak::kTracks[selected_track_].midi_channel;
+  if (!SendSoundPreset(selected_sound_kind_, sound.number, channel,
+                       sound_list_for_drum_kit_ ? selected_drum_kit_part_
+                                                : -1)) {
+    return false;
+  }
+
+  if (sound_list_for_drum_kit_) {
+    drum_kit_sound_names_[selected_drum_kit_part_] = sound.name;
+    drum_kit_sound_numbers_[selected_drum_kit_part_] = sound.number;
+    current_screen_ = ScreenId::kDrumKit;
+    selected_drum_kit_item_ = selected_drum_kit_part_ + 2;
+  } else {
+    track_sound_names_[selected_track_] = sound.name;
+    track_sound_categories_[selected_track_] = sound.category;
+    track_sound_numbers_[selected_track_] = sound.number;
+    track_sound_kinds_[selected_track_] = selected_sound_kind_;
+    ReturnToVariation();
+  }
+  return true;
+}
+
+bool ControllerApp::SendSoundPreset(int kind, uint16_t number, int channel,
+                                    int drum_kit_part) {
+  const int zero_based_number = number - 1;
+  const uint8_t bank_lsb = static_cast<uint8_t>(zero_based_number / 128);
+  const uint8_t program = static_cast<uint8_t>(zero_based_number % 128);
+  const uint8_t bank_msb = drum_kit_part >= 0
+                               ? static_cast<uint8_t>(0x20 + drum_kit_part)
+                               : static_cast<uint8_t>(kind == 3 ? 0x3E : 0x3F);
+
+  if (router_ == nullptr ||
+      !router_->SendToSeqtrak(mk2::BuildControlChange(
+          channel, seqtrak::kCcBankSelectMsb, bank_msb)) ||
+      !router_->SendToSeqtrak(mk2::BuildControlChange(
+          channel, seqtrak::kCcBankSelectLsb, bank_lsb)) ||
+      !router_->SendToSeqtrak(mk2::BuildProgramChange(channel, program))) {
+    std::fprintf(stderr, "controller_app: Sound selection MIDI send failed\n");
+    return false;
+  }
+
+  std::fprintf(stderr,
+               "controller_app: sent sound number=%u bank=%02x/%02x "
+               "program=%u channel=%d\n",
+               number, bank_msb, bank_lsb, program, channel);
+  return true;
+}
+
+bool ControllerApp::ApplyAllTrackSounds() {
+  bool sent_any = false;
+  bool success = true;
+  bool drum_kit_sent = false;
+  for (int track = 0; track < 11; ++track) {
+    if (track_sound_kinds_[track] >= 0 && track_sound_kinds_[track] <= 3 &&
+        track_sound_numbers_[track] > 0) {
+      sent_any = true;
+      success &= SendSoundPreset(track_sound_kinds_[track],
+                                 track_sound_numbers_[track],
+                                 seqtrak::kTracks[track].midi_channel);
+    } else if (track_sound_kinds_[track] == 4 && !drum_kit_sent) {
+      drum_kit_sent = true;
+      for (int part = 0; part < 7; ++part) {
+        if (drum_kit_sound_numbers_[part] == 0) continue;
+        sent_any = true;
+        success &= SendSoundPreset(0, drum_kit_sound_numbers_[part], part + 1,
+                                   part);
+      }
+    }
+  }
+  variation_status_ = !sent_any ? "No presets assigned"
+                                : (success ? "All presets sent"
+                                           : "Preset send failed");
+  return success && sent_any;
 }
 
 void ControllerApp::AppendMidiLog(const mk2::MidiMessage& message) {
@@ -827,10 +1572,37 @@ void ControllerApp::ApplyPendingMidiLogRedraw() {
 }
 
 void ControllerApp::ApplyPendingMidiControls() {
+  if (current_screen_ == ScreenId::kFmEditor) {
+    bool changed = false;
+    for (int knob = 0; knob < 8; ++knob) {
+      const int cc_value = pending_knob_cc_[knob].exchange(-1);
+      if (cc_value < 0 || kFmPages[fm_page_].labels[knob][0] == '-') continue;
+      uint8_t* value = nullptr;
+      if (fm_page_ == 0) {
+        value = &fm_common_[knob];
+      } else if (fm_page_ <= 12) {
+        const int op = (fm_page_ - 1) / 3;
+        const int group = (fm_page_ - 1) % 3;
+        value = &fm_operators_[op][group * 8 + knob];
+      } else {
+        value = &fm_common_[(fm_page_ == 13 ? 8 : 16) + knob];
+      }
+      *value = static_cast<uint8_t>(std::clamp(cc_value, 0, 127));
+      std::fprintf(stderr,
+                   "controller_app: FM page=%d Knob%d %s=%d (MIDI CC)\n",
+                   fm_page_ + 1, knob + 1, kFmPages[fm_page_].labels[knob],
+                   cc_value);
+      changed = true;
+    }
+    if (changed) {
+      fm_status_.clear();
+      DrawLeftLcdUi();
+    }
+    return;
+  }
   if (current_screen_ != ScreenId::kSoundSelect ||
-      lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
-    pending_knob_cc_[0].store(-1);
-    pending_knob_cc_[1].store(-1);
+      lcd_ui_mode_ != LcdUiMode::kTrackDetail) {
+    for (auto& value : pending_knob_cc_) value.store(-1);
     return;
   }
 
@@ -981,6 +1753,24 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
   }
 
   bool ui_changed = false;
+  // FM Editor follows the Penpot navigation contract: PageLeft/PageRight
+  // (panel buttons) and jog left/right move between the 15 pages.
+  if (current_screen_ == ScreenId::kFmEditor && report.size() > 3) {
+    const uint8_t previous_panel = previous_hid_report_.size() > 3
+                                       ? previous_hid_report_[3]
+                                       : 0;
+    if (report[3] == 0x80 && previous_panel != 0x80) {
+      fm_page_ = (fm_page_ + 14) % 15;
+      selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
+      fm_status_.clear();
+      ui_changed = true;
+    } else if (report[3] == 0x20 && previous_panel != 0x20) {
+      fm_page_ = (fm_page_ + 1) % 15;
+      selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
+      fm_status_.clear();
+      ui_changed = true;
+    }
+  }
   const uint8_t current_jog_control =
       report.size() > static_cast<size_t>(mk2::kInputByteJogControl)
           ? report[mk2::kInputByteJogControl]
@@ -1020,7 +1810,11 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
     uint8_t previous = previous_jog_control;
     if (current != previous) {
       if (current == mk2::kJogLeft) {
-        if (current_screen_ == ScreenId::kKeySplit) {
+        if (current_screen_ == ScreenId::kFmEditor) {
+          fm_page_ = (fm_page_ + 14) % 15;
+          selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
+          fm_status_.clear();
+        } else if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitColumn(-1);
         } else if (current_screen_ == ScreenId::kSetCcPc) {
           MoveSetCcPcColumn(-1);
@@ -1029,7 +1823,11 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
         }
         ui_changed = true;
       } else if (current == mk2::kJogRight) {
-        if (current_screen_ == ScreenId::kKeySplit) {
+        if (current_screen_ == ScreenId::kFmEditor) {
+          fm_page_ = (fm_page_ + 1) % 15;
+          selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
+          fm_status_.clear();
+        } else if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitColumn(1);
         } else if (current_screen_ == ScreenId::kSetCcPc) {
           MoveSetCcPcColumn(1);
@@ -1110,11 +1908,33 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
                        : 0,
                    static_cast<int>(lcd_ui_mode_));
 
+      if (current_screen_ == ScreenId::kFmEditor &&
+          (knob_is_being_operated || last_touched_knob_ >= 0)) {
+        const int fm_knob = std::clamp(physical_knob, 0, 7);
+        uint8_t* value = nullptr;
+        if (fm_page_ == 0) {
+          value = &fm_common_[fm_knob];
+        } else if (fm_page_ <= 12) {
+          const int op = (fm_page_ - 1) / 3;
+          const int group = (fm_page_ - 1) % 3;
+          value = &fm_operators_[op][group * 8 + fm_knob];
+        } else {
+          value = &fm_common_[(fm_page_ == 13 ? 8 : 16) + fm_knob];
+        }
+        if (kFmPages[fm_page_].labels[fm_knob][0] != '-') {
+          *value = static_cast<uint8_t>(std::clamp(
+              static_cast<int>(*value) + std::clamp(delta, -10, 10), 0, 127));
+          fm_status_.clear();
+          ui_changed = true;
+        }
+        continue;
+      }
+
       // In the track settings screens, LCD knob 1 edits Volume (0..100) and
       // knob 2 edits Pan (-50..50). Positive hardware deltas are clockwise;
       // negative deltas are counter-clockwise.
       if (current_screen_ == ScreenId::kSoundSelect &&
-          lcd_ui_mode_ != LcdUiMode::kTrackSelect && physical_knob < 2 &&
+          lcd_ui_mode_ == LcdUiMode::kTrackDetail && physical_knob < 2 &&
           (knob_is_being_operated || last_touched_knob_ >= 0)) {
         int step = std::clamp(delta, -10, 10);
         if (physical_knob == 0) {
@@ -1169,17 +1989,60 @@ void ControllerApp::MoveJogSelection(int delta) {
         (selected_settings_item_ + delta % count + count) % count;
     return;
   }
+  if (current_screen_ == ScreenId::kSeqtrakTrackSelect) {
+    constexpr int count = static_cast<int>(seqtrak::kTrackCount) + 1;
+    selected_seqtrak_track_ =
+        ((selected_seqtrak_track_ + 1 + delta % count + count) % count) - 1;
+    return;
+  }
+  if (current_screen_ == ScreenId::kFmEditor) {
+    selected_fm_header_action_ = fm_page_ == 0
+                                     ? (selected_fm_header_action_ +
+                                        delta % 2 + 2) % 2
+                                     : 0;
+    return;
+  }
   if (current_screen_ == ScreenId::kKeySplit) {
     return;
   }
   if (current_screen_ == ScreenId::kSetCcPc) {
     return;
   }
+  if (current_screen_ == ScreenId::kSoundList) {
+    const int sound_count = static_cast<int>(
+        FilteredSoundPresets(selected_sound_kind_,
+                             selected_sound_category_index_)
+            .size());
+    const int count = sound_count + 1;
+    selected_sound_list_item_ =
+        ((selected_sound_list_item_ + 1 + delta % count + count) % count) - 1;
+    return;
+  }
+  if (current_screen_ == ScreenId::kDrumSoundCategory ||
+      current_screen_ == ScreenId::kSynthSoundCategory ||
+      current_screen_ == ScreenId::kDxSoundCategory ||
+      current_screen_ == ScreenId::kSamplerSoundCategory ||
+      current_screen_ == ScreenId::kDrumKit) {
+    if (current_screen_ == ScreenId::kDrumKit) {
+      constexpr int count = 10;
+      selected_drum_kit_item_ =
+          (selected_drum_kit_item_ + delta % count + count) % count;
+    } else {
+      constexpr int count = 16;
+      selected_sound_category_item_ =
+          (selected_sound_category_item_ + delta % count + count) % count;
+    }
+    return;
+  }
   if (current_screen_ != ScreenId::kSoundSelect) return;
 
   if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
-    int count = static_cast<int>(seqtrak::kTrackCount);
-    selected_track_ = (selected_track_ + delta % count + count) % count;
+    constexpr int count = static_cast<int>(seqtrak::kTrackCount) + 2;
+    selected_variation_item_ =
+        (selected_variation_item_ + delta % count + count) % count;
+    if (selected_variation_item_ >= 1 && selected_variation_item_ <= 11) {
+      selected_track_ = selected_variation_item_ - 1;
+    }
   } else if (lcd_ui_mode_ == LcdUiMode::kTrackTypeSelect) {
     constexpr int count = 3;
     int& type = track_types_[selected_track_];
@@ -1418,6 +2281,63 @@ bool ControllerApp::SaveControlAssignments(
   return true;
 }
 
+bool ControllerApp::SaveFmPatch() {
+  bool sent = router_ != nullptr;
+  if (router_) {
+    sent = router_->SendToSeqtrak(mk2::BuildSeqtrakParameterChange(
+               0, seqtrak::kAddrDxCommon,
+               std::vector<uint8_t>(fm_common_.begin(), fm_common_.end()))) &&
+           sent;
+    for (int op = 0; op < 4; ++op) {
+      const seqtrak::ParamAddress address = {
+          seqtrak::kAddrDxOperatorHigh,
+          static_cast<uint8_t>(op * 0x10 + 0x09), 0x00};
+      sent = router_->SendToSeqtrak(mk2::BuildSeqtrakParameterChange(
+                 0, address, std::vector<uint8_t>(fm_operators_[op].begin(),
+                                                  fm_operators_[op].end()))) &&
+             sent;
+    }
+  }
+  if (!sent) {
+    fm_status_ = "SEQTRAK send failed";
+    return false;
+  }
+
+  const std::string temporary_path = std::string(kFmPatchPath) + ".tmp";
+  {
+    std::ofstream output(temporary_path, std::ios::trunc);
+    if (!output) {
+      fm_status_ = "JSON open failed";
+      return false;
+    }
+    output << "{\n  \"format\": \"SEQTRAK_DX_PATCH_V1\",\n";
+    output << "  \"common\": [";
+    for (size_t i = 0; i < fm_common_.size(); ++i)
+      output << (i ? ", " : "") << static_cast<int>(fm_common_[i]);
+    output << "],\n  \"operators\": [\n";
+    for (size_t op = 0; op < fm_operators_.size(); ++op) {
+      output << "    [";
+      for (size_t i = 0; i < fm_operators_[op].size(); ++i)
+        output << (i ? ", " : "") << static_cast<int>(fm_operators_[op][i]);
+      output << "]" << (op + 1 == fm_operators_.size() ? "\n" : ",\n");
+    }
+    output << "  ]\n}\n";
+    if (!output) {
+      fm_status_ = "JSON write failed";
+      return false;
+    }
+  }
+  if (std::rename(temporary_path.c_str(), kFmPatchPath) != 0) {
+    std::remove(temporary_path.c_str());
+    fm_status_ = "JSON replace failed";
+    return false;
+  }
+  fm_status_ = "Sent and saved";
+  std::fprintf(stderr, "controller_app: DX patch sent and saved to %s\n",
+               kFmPatchPath);
+  return true;
+}
+
 void ControllerApp::LoadDrumKeySplitPreset() {
   // Zone 1/13 leave the Light Guide dark and preserve the outer keyboard
   // ranges. Zones 2..12 map the eleven SEQTRAK tracks to contiguous ranges.
@@ -1454,7 +2374,7 @@ void ControllerApp::LoadDrumKeySplitPreset() {
   std::fprintf(stderr, "controller_app: loaded Drum Key Split preset\n");
 }
 
-void ControllerApp::LoadDrumSetKeySplitPreset() {
+void ControllerApp::LoadDrumKitKeySplitPreset() {
   constexpr int kChannels[] = {4, 1, 8, 9, 10, 11, 5, 6, 7};
   constexpr int kRangeEnd[] = {35, 47, 59, 71, 83, 95, 107, 119, 127};
   constexpr int kTargetNote = 60;  // C4
@@ -1471,7 +2391,7 @@ void ControllerApp::LoadDrumSetKeySplitPreset() {
     start_note = zone.high_note + 1;
   }
   NormalizeKeySplitRanges(edited_key_split_settings_);
-  std::fprintf(stderr, "controller_app: loaded DrumSet Key Split preset\n");
+  std::fprintf(stderr, "controller_app: loaded Drum Kit Key Split preset\n");
 }
 
 void ControllerApp::NormalizeKeySplitRanges(KeySplitSettings& settings) {
@@ -1574,6 +2494,11 @@ void ControllerApp::ConfirmJogSelection() {
         ccpc_status_.clear();
         std::fprintf(stderr, "controller_app: screen -> Set CC\n");
         break;
+      case 4:
+        current_screen_ = ScreenId::kSeqtrakTrackSelect;
+        selected_seqtrak_track_ = -1;
+        std::fprintf(stderr, "controller_app: screen -> TRACK SELECT\n");
+        break;
       default:
         std::fprintf(stderr,
                      "controller_app: selected Settings item is not yet "
@@ -1582,12 +2507,33 @@ void ControllerApp::ConfirmJogSelection() {
     }
     return;
   }
+  if (current_screen_ == ScreenId::kSeqtrakTrackSelect) {
+    if (selected_seqtrak_track_ < 0) {
+      current_screen_ = ScreenId::kSettings;
+    } else if (selected_seqtrak_track_ == 9) {
+      current_screen_ = ScreenId::kFmEditor;
+      fm_page_ = 0;
+      selected_fm_header_action_ = 1;
+      fm_status_.clear();
+      std::fprintf(stderr, "controller_app: DX -> FM Editor UI v2\n");
+    }
+    return;
+  }
+  if (current_screen_ == ScreenId::kFmEditor) {
+    if (fm_page_ != 0 || selected_fm_header_action_ == 0) {
+      current_screen_ = ScreenId::kSeqtrakTrackSelect;
+      selected_seqtrak_track_ = 9;
+    } else {
+      SaveFmPatch();
+    }
+    return;
+  }
   if (current_screen_ == ScreenId::kKeySplit) {
     if (selected_key_split_row_ == 0) {
       if (selected_key_split_zones_action_ == 1) {
         LoadDrumKeySplitPreset();
       } else if (selected_key_split_zones_action_ == 2) {
-        LoadDrumSetKeySplitPreset();
+        LoadDrumKitKeySplitPreset();
       }
       return;
     }
@@ -1622,14 +2568,83 @@ void ControllerApp::ConfirmJogSelection() {
     current_screen_ = ScreenId::kSettings;
     return;
   }
+  if (current_screen_ == ScreenId::kDrumSoundCategory ||
+      current_screen_ == ScreenId::kSynthSoundCategory ||
+      current_screen_ == ScreenId::kDxSoundCategory ||
+      current_screen_ == ScreenId::kSamplerSoundCategory ||
+      current_screen_ == ScreenId::kDrumKit) {
+    if (current_screen_ == ScreenId::kDrumKit) {
+      if (selected_drum_kit_item_ == 0) {
+        ReturnToVariation();
+      } else if (selected_drum_kit_item_ == 9) {
+        track_sound_names_[selected_track_] = "Drum Kit";
+        track_sound_categories_[selected_track_] = "Drum Kit";
+        track_sound_numbers_[selected_track_] = 0;
+        track_sound_kinds_[selected_track_] = 4;
+        ReturnToVariation();
+      } else if (selected_drum_kit_item_ >= 2 &&
+                 selected_drum_kit_item_ <= 8) {
+        current_screen_ = ScreenId::kDrumSoundCategory;
+        selected_sound_category_item_ = 0;
+        selected_drum_kit_part_ = selected_drum_kit_item_ - 2;
+        sound_list_for_drum_kit_ = true;
+        std::fprintf(stderr,
+                     "controller_app: Drum Kit part -> Drum Sound Category\n");
+      }
+    } else if (selected_sound_category_item_ == 0) {
+      ReturnToVariation();
+    } else {
+      if (current_screen_ == ScreenId::kDrumSoundCategory) {
+        selected_sound_kind_ = 0;
+      } else if (current_screen_ == ScreenId::kSynthSoundCategory) {
+        selected_sound_kind_ = 1;
+      } else if (current_screen_ == ScreenId::kDxSoundCategory) {
+        selected_sound_kind_ = 2;
+      } else {
+        selected_sound_kind_ = 3;
+      }
+      selected_sound_category_index_ = selected_sound_category_item_ - 1;
+      selected_sound_list_item_ = -1;
+      current_screen_ = ScreenId::kSoundList;
+    }
+    return;
+  }
+  if (current_screen_ == ScreenId::kSoundList) {
+    if (selected_sound_list_item_ == -1) {
+      switch (selected_sound_kind_) {
+        case 0:
+          current_screen_ = ScreenId::kDrumSoundCategory;
+          break;
+        case 1:
+          current_screen_ = ScreenId::kSynthSoundCategory;
+          break;
+        case 2:
+          current_screen_ = ScreenId::kDxSoundCategory;
+          break;
+        case 3:
+          current_screen_ = ScreenId::kSamplerSoundCategory;
+          break;
+      }
+      selected_sound_category_item_ = selected_sound_category_index_ + 1;
+    } else {
+      ApplySelectedSound();
+    }
+    return;
+  }
   if (current_screen_ != ScreenId::kSoundSelect) return;
 
   if (lcd_ui_mode_ == LcdUiMode::kTrackSelect) {
-    lcd_ui_mode_ = (selected_track_ == 9 || selected_track_ == 10)
-                       ? LcdUiMode::kTrackDetail
-                       : LcdUiMode::kTrackTypeSelect;
+    if (selected_variation_item_ == 0) {
+      ReturnToControllerHome();
+    } else if (selected_variation_item_ == 12) {
+      ApplyAllTrackSounds();
+    } else if (selected_track_ == 9 || selected_track_ == 10) {
+      OpenSelectedSoundDestination();
+    } else {
+      lcd_ui_mode_ = LcdUiMode::kTrackTypeSelect;
+    }
   } else if (lcd_ui_mode_ == LcdUiMode::kTrackTypeSelect) {
-    lcd_ui_mode_ = LcdUiMode::kTrackDetail;
+    OpenSelectedSoundDestination();
   }
 }
 

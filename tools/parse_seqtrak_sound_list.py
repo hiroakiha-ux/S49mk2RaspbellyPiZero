@@ -66,7 +66,8 @@ def find_section_bounds(lines):
             # List").
             end = None
             for i in range(start, len(lines)):
-                if "SEQTRAK Data ListWave List" in lines[i]:
+                if ("SEQTRAK Data ListWave List" in lines[i] or
+                        lines[i].strip() == "Wave List"):
                     end = i
                     break
             if end is None:

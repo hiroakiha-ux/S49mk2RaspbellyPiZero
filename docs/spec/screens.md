@@ -8,6 +8,10 @@
    ├─ Play → MIDIスルーを開始してMIDI LOGへ移動
    │  └─ Prev. → SEQTRAK Controller
    ├─ Sound Select → S49 MK2 LCD — Variation 01 — Shinonome12
+   │  ├─ Prev. → SEQTRAK Controller
+   │  ├─ DX／SAMPLER → 対応するSound Category
+   │  └─ Drum／Drum Kit／Synth → 対応するSound Category／Drum Kit
+   │     └─ 各展開先のPrev. → Variation 01
    └─ Setting → Settings
       └─ Key Split → Key Split（実装完了）
       └─ Set CC → Set CC（一部実装）
@@ -59,80 +63,120 @@
 - SYNTH2
 - DX
 - SAMPLER
-- 選択トラックのTrack Type、Volume、Pan
+- 選択トラックのTrack Type
+- 右LCDに全11トラックのCategory／Sound一覧
 
 ### 操作
 
 - ジョグ回転: トラックまたは設定値を選択する
 - ジョグ押下: 選択したトラックの詳細へ進む
+- Prev.: SEQTRAK Controllerへ戻る
+- Volume／Pan表示は廃止し、設定済みCategory／Soundを表示する
+- ヘッダー右のOK: 保持している全トラックのSoundプリセットをCC0／CC32／
+  Program ChangeでSEQTRAKへ一括送信する
 
-### Nextボタン
+### トラック／Track Type確定
 - Track:DXの場合
   DX Sound Category — Shinonome12 へ展開する
 - Track:SAMPLERの場合
   SAMPLER Sound Category — Shinonome12 へ展開する
 - TrackType:Drumの場合
 　Drum Sound Category — Shinonome12　へ展開する
-- TrackType:DrumKitの場合
-  DrumSet — Shinonome12 へ展開する
+- TrackType:Drum Kitの場合
+  Drum Kit — Shinonome12 へ展開する
 - TrackType:Synthの場合
   Synth Sound Category — Shinonome12 へ展開する
 
 ## SCR-003: Drum Sound Category — Shinonome12
 
-- 状態: 設計済み
+- 状態: 実装済み（カテゴリーボタン、選択、Sound List遷移）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、カテゴリボタン3列 × 5段
 - 用途: DrumのSound Categoryを選択する
+- Prev.: Variation 01へ戻る
+- カテゴリー: Kick、Snare、Rim、Clap、Snap、Closed HiHat、Open HiHat、
+  Shaker / Tambourine、Ride、Crash、Tom、Bell、Conga / Bongo、World、SFX
 
 ###　Nextボタン
 - 選択されたカテゴリをパラメータとしてSound List — Shinonome12を開く
 
 ## SCR-004: Synth Sound Category — Shinonome12
 
-- 状態: 設計済み
+- 状態: 実装済み（カテゴリーボタン、選択、Sound List遷移）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、カテゴリボタン3列 × 5段
 - 用途: SynthのSound Categoryを選択する
+- Prev.: Variation 01へ戻る
+- カテゴリー: Bass、Synth Lead、Piano、Keyboard、Organ、Pad、Strings、
+  Brass、Woodwind、Guitar、World、Mallet、Bell、Rhythmic、SFX
 
 ###　Nextボタン
 - 選択されたカテゴリをパラメータとしてSound List — Shinonome12を開く
 
 ## SCR-005: DX Sound Category — Shinonome12
 
-- 状態: 設計済み
+- 状態: 実装済み（カテゴリーボタン、選択、Sound List遷移）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、カテゴリボタン3列 × 5段
 - 用途: DXのSound Categoryを選択する
+- Prev.: Variation 01へ戻る
+- カテゴリー: Bass、Synth Lead、Piano、Keyboard、Organ、Pad、Strings、
+  Brass、Woodwind、Guitar、World、Mallet、Bell、Rhythmic、SFX
 
 ###　Nextボタン
 - 選択されたカテゴリをパラメータとしてSound List — Shinonome12を開く
 
 ## SCR-006: SAMPLER Sound Category — Shinonome12
 
-- 状態: 設計済み
+- 状態: 実装済み（カテゴリーボタン、選択、Sound List遷移）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、カテゴリボタン3列 × 5段
 - 用途: SAMPLERのSound Categoryを選択する
+- Prev.: Variation 01へ戻る
+- カテゴリー: Vocal Count、Vocal Phrase / Chant、Singing Vocal、
+  Robotic Vocal / Effect、Riser、Laser / Sci-Fi、Impact、
+  Noise / Distorted Sound、Ambient / Soundscape、SFX、Scratch、
+  Nature / Animals、Hit / Stab / Musical Instrument Sound、Percussion、
+  Recorded Sound
 
 ###　Nextボタン
 - 選択されたカテゴリをパラメータとしてSound List — Shinonome12を開く
 
 ## SCR-007: Sound List — Shinonome12
 
-- 状態: 設計済み
-- サイズ: 480 × 272 px
-- レイアウト: ヘッダー28 px、空ラベルボタン3列 × 5段、右側に縦スクロール領域
+- 状態: 実装済み（一覧表示、選択、SEQTRAKへのBank Select／Program Change送信）
+- サイズ: 左右LCD各480 × 272 px
+- レイアウト: ヘッダー28 px、左右各10件、合計20件単位のページ表示
 - 用途: 選択したカテゴリ内のSoundを選択する
+- Soundデータ: `SEQTRAK_data_list_En_D0.pdf`から抽出したDrum 855件、
+  Synth 1,077件、DX 100件、SAMPLER 392件
+- ジョグ回転: Prev.とカテゴリー内の全Soundを移動する
+- ジョグ押下: 選択Soundを対象トラックへ設定する
+- 通常トラック: CC0／CC32／Program Change送信後、Variation 01へ戻る
+- Drum Kitパート: Part番号に応じたMIDI CH 1～7とMSB `0x20`～`0x26`を
+  使用し、設定後はDrum Kitへ戻って対象パートにSound名を表示する
+- Prev.: 選択元のSound Categoryへ戻る
 
-- 選択されたサウンドをSEQTRAKに設定して、C3ノートを0.5秒送ってサンプルを鳴らす。
+## SCR-008: Drum Kit — Shinonome12
 
-## SCR-008: DrumSet — Shinonome12
-
-- 状態: 設計済み
+- 状態: 画面実装済み（Type／パートの選択表示まで。設定処理は未実装）
 - サイズ: 480 × 272 px
 - レイアウト: ヘッダー28 px、ボタン2段、フッター
 - 用途: Drumパートと設定値を選択する
+- Prev.: Variation 01へ戻る
+- ジョグ回転: Prev.、Type、KICK～PERC 2の選択を移動する
+- ジョグ押下: Prev.選択時はVariation 01へ戻る。KICK～PERC 2選択時は
+  Drum Sound Categoryへ進む。Typeの設定処理は今後実装する
+- 各パートには設定済みSound名を表示する
+- ヘッダー右のOK: Variation 01へ戻り、対象トラックのCategory／Sound表示を
+  `Drum Kit`にする
+
+### TODO: Drum Kitトラック設定
+
+- 各パートのSound設定はData List記載のMIDI CH 1～7、Bank Select MSB
+  `0x20`～`0x26`、LSB、Program Changeで実装済み
+- SEQTRAKのトラック自体をDrum Kit型へ切り替える外部MIDI手順はData Listから
+  特定できていない。実機解析後にDrum KitのOK処理へ追加する
 
 ### ボタン
 
@@ -191,7 +235,7 @@
 - 入力範囲: 1～16
 - デフォルト値: 1
 - Drumボタン: 13 ZoneのDrumプリセットを読み込む
-- DrumSetボタン: 9 ZoneのDrumSetプリセットを読み込む
+- Drum Kitボタン: 9 ZoneのDrum Kitプリセットを読み込む
 
 #### Drumプリセット
 
@@ -204,7 +248,7 @@
 - Zone 13: C7～G9、CH13、Transpose 0、Light Guide消灯
 - Drum用Zoneの色は隣接Zoneで異なる色にする
 
-#### DrumSetプリセット
+#### Drum Kitプリセット
 
 - Zone 01: C1～B1、CH4、開始音をC4へ移調
 - Zone 02: C2～B2、CH1、開始音をC4へ移調

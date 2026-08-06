@@ -7,20 +7,25 @@
 | BTN-001 | SEQTRAK Controller | Play | MIDIスルーを有効にしてSCR-012へ移動する | 実装済み |
 | BTN-002 | SEQTRAK Controller | Sound Select | SCR-002へ移動する | 実装済み |
 | BTN-003 | SEQTRAK Controller | Setting | Setting画面へ移動する | 実装済み |
+| BTN-004 | Variation 01 | Prev. | SEQTRAK Controllerへ戻る | 実装済み |
 | BTN-010～020 | Variation 01 | KICK～SAMPLER | 対象トラックを選択する | 実装済み |
-| BTN-030～044 | Drum Sound Category | PDF記載のカテゴリ名 | カテゴリを選び、Sound Listへ移動する | 未実装 |
-| BTN-050～064 | Synth Sound Category | PDF記載のカテゴリ名 | カテゴリを選び、Sound Listへ移動する | 未実装 |
-| BTN-070～084 | DX Sound Category | PDF記載のカテゴリ名 | カテゴリを選び、Sound Listへ移動する | 未実装 |
-| BTN-090～104 | SAMPLER Sound Category | PDF記載のカテゴリ名 | カテゴリを選び、Sound Listへ移動する | 未実装 |
-| BTN-110～124 | Sound List | Sound名 | Soundを選択する | 未実装 |
-| BTN-130 | DrumSet | Type | DrumSetのTypeを選択する | 未実装 |
-| BTN-131 | DrumSet | KICK | KICKパートを選択する | 未実装 |
-| BTN-132 | DrumSet | SNARE | SNAREパートを選択する | 未実装 |
-| BTN-133 | DrumSet | CLAP | CLAPパートを選択する | 未実装 |
-| BTN-134 | DrumSet | HAT 1 | HAT 1パートを選択する | 未実装 |
-| BTN-135 | DrumSet | HAT 2 | HAT 2パートを選択する | 未実装 |
-| BTN-136 | DrumSet | PERC 1 | PERC 1パートを選択する | 未実装 |
-| BTN-137 | DrumSet | PERC 2 | PERC 2パートを選択する | 未実装 |
+| BTN-021 | Sound Category | Prev. | Variation 01へ戻る | 実装済み |
+| BTN-022 | Drum Kit | Prev. | Variation 01へ戻る | 実装済み |
+| BTN-023 | Variation 01 | OK | 全トラックのSoundプリセットを一括送信する | 実装済み |
+| BTN-024 | Drum Kit | OK | Drum Kitを確定してVariation 01へ戻る | 現行仕様完了 |
+| BTN-030～044 | Drum Sound Category | PDF記載のカテゴリ名 | Sound Listへ移動する | 実装済み |
+| BTN-050～064 | Synth Sound Category | PDF記載のカテゴリ名 | Sound Listへ移動する | 実装済み |
+| BTN-070～084 | DX Sound Category | PDF記載のカテゴリ名 | Sound Listへ移動する | 実装済み |
+| BTN-090～104 | SAMPLER Sound Category | PDF記載のカテゴリ名 | Sound Listへ移動する | 実装済み |
+| BTN-110～124 | Sound List | Sound名 | 対象トラックへSoundを設定する | 実装済み |
+| BTN-130 | Drum Kit | Type | Drum KitのTypeを選択する | 選択表示実装済み |
+| BTN-131 | Drum Kit | KICK | Drum Sound Categoryへ移動する | 実装済み |
+| BTN-132 | Drum Kit | SNARE | Drum Sound Categoryへ移動する | 実装済み |
+| BTN-133 | Drum Kit | CLAP | Drum Sound Categoryへ移動する | 実装済み |
+| BTN-134 | Drum Kit | HAT 1 | Drum Sound Categoryへ移動する | 実装済み |
+| BTN-135 | Drum Kit | HAT 2 | Drum Sound Categoryへ移動する | 実装済み |
+| BTN-136 | Drum Kit | PERC 1 | Drum Sound Categoryへ移動する | 実装済み |
+| BTN-137 | Drum Kit | PERC 2 | Drum Sound Categoryへ移動する | 実装済み |
 | BTN-150 | Settings | S49MK2 | S49 MK2設定画面へ移動する | 未実装 |
 | BTN-151 | Settings | SERTRAK | SEQTRAK設定画面へ移動する | 未実装 |
 | BTN-152 | Settings | Controller | Controller設定画面へ移動する | 未実装 |
