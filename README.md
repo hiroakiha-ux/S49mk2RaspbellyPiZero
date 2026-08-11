@@ -1,8 +1,8 @@
-# S49 MK2 ⇄ SEQTRAK Raspberry Pi Zero 2 W bridge
+# S49 MK2 ⇄ SEQTRAK Raspberry Pi bridge
 
 Standalone C++ port of the `KompleteControl_MK2` Python protocol research
 (`資料/KompleteControl_MK2-main_extracted/`), targeting a headless
-Raspberry Pi Zero 2 W that USB-hosts a hub with:
+Raspberry Pi that USB-hosts a hub with:
 
 - Native Instruments KOMPLETE KONTROL S49 MK2 (LCDs, Light Guide, button
   LEDs, knobs, jog wheel, keybed)
@@ -38,6 +38,9 @@ sections. Comments in each header cite where a value came from and flag
 anything still marked "inferred"/"unknown" upstream.
 
 ## Build (on the Raspberry Pi, or an aarch64/armhf cross environment)
+
+Tested on Raspberry Pi Zero W and Raspberry Pi 4. Raspberry Pi Zero 2 W is
+an intended target, but has not yet been verified on real hardware.
 
 ```bash
 sudo apt install build-essential cmake pkg-config libusb-1.0-0-dev libasound2-dev

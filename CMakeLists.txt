@@ -51,6 +51,10 @@ add_library(mk2_seq
 )
 target_include_directories(mk2_seq PUBLIC include)
 target_link_libraries(mk2_seq PUBLIC mk2_midi)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # ARMv6 (Raspberry Pi Zero) needs libatomic for 64-bit atomic operations.
+  target_link_libraries(mk2_seq PUBLIC atomic)
+endif()
 
 add_executable(s49mk2_bridge
   src/app/main.cpp

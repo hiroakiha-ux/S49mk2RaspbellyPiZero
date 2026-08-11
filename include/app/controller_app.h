@@ -28,7 +28,7 @@ namespace mk2app {
 
 class ControllerApp {
  public:
-  ControllerApp() = default;
+  ControllerApp();
   ~ControllerApp();
 
   ControllerApp(const ControllerApp&) = delete;
@@ -67,6 +67,7 @@ class ControllerApp {
     kSettings,
     kSeqtrakTrackSelect,
     kFmEditor,
+    kAwm2Editor,
     kKeySplit,
     kSetCcPc,
     kMidiLog
@@ -100,6 +101,7 @@ class ControllerApp {
   void DrawSettings(mk2::LcdCanvas& canvas);
   void DrawSeqtrakTrackSelect(mk2::LcdCanvas& canvas);
   void DrawFmEditor(mk2::LcdCanvas& canvas, bool right_screen);
+  void DrawAwm2Editor(mk2::LcdCanvas& canvas, bool right_screen);
   void DrawKeySplit(mk2::LcdCanvas& canvas);
   void DrawSetCcPc(mk2::LcdCanvas& canvas, bool right_screen);
   void DrawMidiLog(mk2::LcdCanvas& canvas);
@@ -157,6 +159,19 @@ class ControllerApp {
   std::array<uint8_t, 28> fm_common_{};
   std::array<std::array<uint8_t, 36>, 4> fm_operators_{};
   std::string fm_status_;
+  int awm_page_ = 0;
+  int awm_track_ = 0;
+  enum class AwmOverviewMode { kOverview, kCategory, kSound };
+  AwmOverviewMode awm_overview_mode_ = AwmOverviewMode::kOverview;
+  int selected_awm_element_ = 0;
+  int selected_awm_category_ = 0;
+  int selected_awm_sound_ = 0;
+  std::array<int, 8> awm_element_categories_{};
+  std::array<uint16_t, 8> awm_element_sound_numbers_{};
+  std::array<std::string, 8> awm_element_sound_names_{};
+  std::array<std::array<uint8_t, 8>, 5> awm_common_{};
+  std::array<std::array<std::array<uint8_t, 8>, 4>, 8> awm_elements_{};
+  std::array<std::array<uint8_t, 8>, 2> awm_insertions_{};
   int selected_dialog_action_ = 0;
   std::array<ControlAssignment, 17> control_assignments_{};
   std::array<ControlAssignment, 17> edited_control_assignments_{};

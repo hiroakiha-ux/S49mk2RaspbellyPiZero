@@ -58,6 +58,42 @@ constexpr std::array<FmPageSpec, 15> kFmPages = {{
     {"DX FM > COMMON > LFO", {"PB SENS", "LFO WAVE", "LFO SPEED", "LFO DELAY", "LFO PMD", "-", "-", "-"}},
     {"DX FM > COMMON > PEG", {"PEG RATE1", "PEG RATE2", "PEG RATE3", "PEG RATE4", "PEG LVL1", "PEG LVL2", "PEG LVL3", "PEG LVL4"}},
 }};
+
+struct AwmPageSpec {
+  std::string title;
+  std::array<const char*, 8> labels;
+};
+
+AwmPageSpec GetAwmPageSpec(int page) {
+  constexpr std::array<std::array<const char*, 8>, 5> common = {{
+      {"E1", "E2", "E3", "E4", "VOLUME", "PAN", "MONO/POLY", "PORTA TIME"},
+      {"VOLUME", "PAN", "MONO/POLY", "PORTA TIME", "PB RANGE+", "REVERB SEND", "VAR SEND", "DRY LEVEL"},
+      {"AEG ATTACK", "AEG DECAY", "AEG SUSTAIN", "AEG RELEASE", "FEG ATTACK", "FEG DECAY", "FEG SUSTAIN", "FEG RELEASE"},
+      {"CUTOFF OFS", "RESO OFS", "NOTE SHIFT", "LEGATO SLOPE", "KEY ASSIGN", "TRIG/GATE", "PB RANGE-", "-"},
+      {"LFO WAVE", "LFO SPEED", "LFO DELAY", "FADE IN", "BOX1 DEST", "BOX1 DEPTH", "BOX2 DEST", "BOX2 DEPTH"},
+  }};
+  constexpr const char* common_titles[] = {
+      "AWM2 SYNTH > OVERVIEW", "AWM2 SYNTH > COMMON > MAIN",
+      "AWM2 SYNTH > COMMON > EG", "AWM2 SYNTH > COMMON > FILTER",
+      "AWM2 SYNTH > LFO"};
+  if (page < 5) return {common_titles[page], common[page]};
+  if (page < 37) {
+    const int element = (page - 5) / 4 + 1;
+    const int section = (page - 5) % 4;
+    constexpr const char* names[] = {"BASIC", "ZONE", "AEG", "FILTER"};
+    constexpr std::array<std::array<const char*, 8>, 4> labels = {{
+        {"ASSIGN", "WAVE NO.", "COARSE", "FINE", "PAN", "LEVEL", "VEL SENS", "OUTPUT"},
+        {"NOTE LOW", "NOTE HIGH", "VEL LOW", "VEL HIGH", "LVL BP1", "LVL BP2", "LVL BP3", "LVL BP4"},
+        {"ATTACK", "DECAY 1", "DECAY 2", "RELEASE", "ATTACK LVL", "DECAY1 LVL", "DECAY2 LVL", "INIT LVL"},
+        {"FILTER TYPE", "CUTOFF", "RESONANCE", "HPF CUTOFF", "FEG DEPTH", "FEG ATTACK", "FEG DECAY", "FEG RELEASE"},
+    }};
+    return {"AWM2 SYNTH > E" + std::to_string(element) + " > " + names[section],
+            labels[section]};
+  }
+  if (page == 37)
+    return {"AWM2 SYNTH > INSERTION A", {"FX TYPE", "RATE", "DEPTH", "FEEDBACK", "WIDTH", "DRY/WET", "-", "-"}};
+  return {"AWM2 SYNTH > INSERTION B", {"FX TYPE", "FILTER TYPE", "CUTOFF", "RESONANCE", "-", "DRY/WET", "-", "-"}};
+}
 constexpr int kKeySplitFieldsPerZone = 4;
 constexpr int kKeySplitLowestNote = 24;    // C1
 constexpr int kKeySplitHighestNote = 127;  // G9
@@ -318,6 +354,11 @@ std::string FormatMidiLogLine(const mk2::MidiMessage& message) {
 
 }  // namespace
 
+ControllerApp::ControllerApp() {
+  // Penpot AWM2 Overview default: E1 assigned, E2..E8 disabled.
+  awm_elements_[0][0][0] = 1;
+}
+
 ControllerApp::~ControllerApp() { Stop(); }
 
 bool ControllerApp::Initialize() {
@@ -420,7 +461,8 @@ void ControllerApp::DrawLeftLcdUi() {
   if (current_screen_ != ScreenId::kSetCcPc &&
       current_screen_ != ScreenId::kSoundSelect &&
       current_screen_ != ScreenId::kSoundList &&
-      current_screen_ != ScreenId::kFmEditor && right_lcd_has_ui_) {
+      current_screen_ != ScreenId::kFmEditor &&
+      current_screen_ != ScreenId::kAwm2Editor && right_lcd_has_ui_) {
     mk2::LcdCanvas blank_right;
     blank_right.Clear(0, 0, 0);
     SendOrPreviewLcdPacket(
@@ -458,6 +500,18 @@ void ControllerApp::DrawLeftLcdUi() {
     right.Clear(0, 0, 0);
     DrawFmEditor(left, false);
     DrawFmEditor(right, true);
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
+    SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "right",
+                           mk2::BuildLcdPacket(mk2::kLcdScreenRight, right));
+    right_lcd_has_ui_ = true;
+    return;
+  }
+  if (current_screen_ == ScreenId::kAwm2Editor) {
+    mk2::LcdCanvas right;
+    right.Clear(0, 0, 0);
+    DrawAwm2Editor(left, false);
+    DrawAwm2Editor(right, true);
     SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "left",
                            mk2::BuildLcdPacket(mk2::kLcdScreenLeft, left));
     SendOrPreviewLcdPacket(lcd_device_.get(), dry_run_, "right",
@@ -1156,6 +1210,152 @@ void ControllerApp::DrawFmEditor(mk2::LcdCanvas& canvas, bool right_screen) {
     DrawShinonomeText(canvas, 12, 246, fm_status_, 72, 213, 151);
 }
 
+void ControllerApp::DrawAwm2Editor(mk2::LcdCanvas& canvas,
+                                   bool right_screen) {
+  const auto page = GetAwmPageSpec(awm_page_);
+  canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
+  if (!right_screen) {
+    FillRoundedRect(canvas, 8, 4, 72, 20, 3, 32, 42, 51);
+    DrawShinonomeText(canvas, 14, 6, "<PREV", 170, 179, 192);
+    DrawShinonomeText(canvas, 104, 6, page.title, 244, 247, 250);
+  } else {
+    DrawShinonomeText(canvas, 8, 6, seqtrak::kTracks[awm_track_].name,
+                      244, 247, 250);
+    DrawShinonomeText(canvas, 370, 6,
+                      std::to_string(awm_page_ + 1) + "/39", 170, 179, 192);
+  }
+
+  if (awm_page_ == 0 && awm_overview_mode_ == AwmOverviewMode::kCategory) {
+    const int begin = right_screen ? 8 : 0;
+    const int end = right_screen ? 15 : 8;
+    for (int index = begin; index < end; ++index) {
+      const int local = index - begin;
+      const int y = 42 + local * 28;
+      const bool selected = index == selected_awm_category_;
+      if (selected) canvas.FillRect(12, y - 2, 452, 24, 37, 73, 88);
+      DrawShinonomeText(canvas, 24, y, kSynthCategories[index],
+                        selected ? 79 : 244, selected ? 195 : 247,
+                        selected ? 247 : 250);
+    }
+    return;
+  }
+  if (awm_page_ == 0 && awm_overview_mode_ == AwmOverviewMode::kSound) {
+    const auto sounds = FilteredSoundPresets(1, selected_awm_category_);
+    const int page_start = (selected_awm_sound_ / 16) * 16;
+    const int begin = page_start + (right_screen ? 8 : 0);
+    const int end = std::min(begin + 8, static_cast<int>(sounds.size()));
+    for (int index = begin; index < end; ++index) {
+      const int y = 42 + (index - begin) * 28;
+      const bool selected = index == selected_awm_sound_;
+      if (selected) canvas.FillRect(12, y - 2, 452, 24, 37, 73, 88);
+      DrawShinonomeText(canvas, 24, y,
+                        Ellipsize(sounds[index]->name, 420),
+                        selected ? 79 : 244, selected ? 195 : 247,
+                        selected ? 247 : 250);
+    }
+    return;
+  }
+  if (awm_page_ == 0 && !right_screen) {
+    for (int element = 0; element < 8; ++element) {
+      const int y = 36 + element * 28;
+      const auto& basic = awm_elements_[element][0];
+      const bool assigned = basic[0] != 0;
+      if (element == selected_awm_element_)
+        canvas.FillRect(16, y - 2, 448, 24, 37, 73, 88);
+      DrawShinonomeText(canvas, 32, y,
+                        "E" + std::to_string(element + 1),
+                        assigned ? 255 : 130, assigned ? 145 : 147,
+                        assigned ? 45 : 160);
+      DrawShinonomeText(canvas, 80, y,
+                        assigned ? (awm_element_sound_names_[element].empty()
+                                        ? "SELECT SOUND"
+                                        : awm_element_sound_names_[element])
+                                 : "OFF",
+                        244, 247, 250);
+      DrawShinonomeText(canvas, 400, y, assigned ? "ON" : "OFF",
+                        170, 179, 192);
+    }
+    return;
+  }
+  if (awm_page_ == 0 && right_screen) {
+    const bool assigned = awm_elements_[selected_awm_element_][0][0] != 0;
+    DrawShinonomeText(canvas, 24, 48,
+                      "ELEMENT E" + std::to_string(selected_awm_element_ + 1),
+                      244, 247, 250);
+    DrawShinonomeText(canvas, 24, 88,
+                      std::string("STATUS: ") + (assigned ? "ON" : "OFF"),
+                      assigned ? 72 : 170, assigned ? 213 : 179,
+                      assigned ? 151 : 192);
+    if (assigned) {
+      DrawShinonomeText(canvas, 24, 132,
+                        "CATEGORY: " +
+                            std::string(kSynthCategories[awm_element_categories_[selected_awm_element_]]),
+                        79, 195, 247);
+      DrawShinonomeText(canvas, 24, 172,
+                        "SOUND: " +
+                            (awm_element_sound_names_[selected_awm_element_].empty()
+                                 ? std::string("--")
+                                 : awm_element_sound_names_[selected_awm_element_]),
+                        244, 247, 250);
+    }
+    DrawShinonomeText(canvas, 24, 228, "Press: ON/OFF", 130, 147, 160);
+    return;
+  }
+
+  std::array<uint8_t, 8>* values = nullptr;
+  if (awm_page_ < 5) values = &awm_common_[awm_page_];
+  else if (awm_page_ < 37) {
+    const int element = (awm_page_ - 5) / 4;
+    const int section = (awm_page_ - 5) % 4;
+    values = &awm_elements_[element][section];
+  } else {
+    values = &awm_insertions_[awm_page_ - 37];
+  }
+
+  const bool aeg = awm_page_ >= 7 && awm_page_ < 37 &&
+                   (awm_page_ - 5) % 4 == 2;
+  if (aeg) {
+    constexpr int left = 20, right = 460, top = 42, bottom = 166;
+    canvas.DrawRect(left, top, right - left, bottom - top, 82, 97, 109);
+    std::array<int, 5> x = {left + 2, 0, 0, 0, right - 2};
+    std::array<int, 5> y = {bottom - 2, 0, 0, 0, 0};
+    int sum = 0;
+    std::array<int, 4> duration{};
+    for (int i = 0; i < 4; ++i) {
+      duration[i] = std::max(8, 135 - static_cast<int>((*values)[i]));
+      sum += duration[i];
+    }
+    int elapsed = 0;
+    for (int i = 1; i <= 4; ++i) {
+      elapsed += duration[i - 1];
+      x[i] = left + 2 + elapsed * (right - left - 4) / sum;
+      y[i] = bottom - 2 - (*values)[i + 3] * (bottom - top - 4) / 127;
+      DrawLine(canvas, x[i - 1], y[i - 1], x[i], y[i], 0, 215, 255);
+      canvas.FillRect(x[i] - 3, y[i] - 3, 7, 7, 255, 145, 45);
+    }
+  }
+
+  const int base = right_screen ? 4 : 0;
+  for (int col = 0; col < 4; ++col) {
+    const int parameter = base + col;
+    const int x = col * 120;
+    const int label_y = aeg ? 182 : 48;
+    if (col > 0) canvas.FillRect(x, aeg ? 178 : 32, 1, aeg ? 86 : 232,
+                                 55, 65, 81);
+    DrawShinonomeText(canvas, x + 10, label_y, page.labels[parameter],
+                      170, 179, 192);
+    if (!aeg) {
+      canvas.FillRect(x + 14, 92, 92, 12, 37, 43, 52);
+      canvas.FillRect(x + 14, 92, (*values)[parameter] * 92 / 127, 12,
+                      0, 215, 255);
+    }
+    DrawShinonomeText(canvas, x + 48, aeg ? 214 : 132,
+                      std::to_string((*values)[parameter]), 244, 247, 250);
+    DrawShinonomeText(canvas, x + 38, aeg ? 242 : 190, "0-127",
+                      130, 147, 160);
+  }
+}
+
 void ControllerApp::DrawKeySplit(mk2::LcdCanvas& canvas) {
   canvas.FillRect(0, 0, mk2::kLcdWidth, 28, 27, 32, 40);
   DrawShinonomeText(canvas, 12, 6, "Key Split", 244, 247, 250);
@@ -1572,6 +1772,23 @@ void ControllerApp::ApplyPendingMidiLogRedraw() {
 }
 
 void ControllerApp::ApplyPendingMidiControls() {
+  if (current_screen_ == ScreenId::kAwm2Editor) {
+    bool changed = false;
+    std::array<uint8_t, 8>* values = nullptr;
+    if (awm_page_ < 5) values = &awm_common_[awm_page_];
+    else if (awm_page_ < 37)
+      values = &awm_elements_[(awm_page_ - 5) / 4][(awm_page_ - 5) % 4];
+    else values = &awm_insertions_[awm_page_ - 37];
+    const auto page = GetAwmPageSpec(awm_page_);
+    for (int knob = 0; knob < 8; ++knob) {
+      const int cc = pending_knob_cc_[knob].exchange(-1);
+      if (cc < 0 || page.labels[knob][0] == '-') continue;
+      (*values)[knob] = static_cast<uint8_t>(std::clamp(cc, 0, 127));
+      changed = true;
+    }
+    if (changed) DrawLeftLcdUi();
+    return;
+  }
   if (current_screen_ == ScreenId::kFmEditor) {
     bool changed = false;
     for (int knob = 0; knob < 8; ++knob) {
@@ -1755,19 +1972,28 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
   bool ui_changed = false;
   // FM Editor follows the Penpot navigation contract: PageLeft/PageRight
   // (panel buttons) and jog left/right move between the 15 pages.
-  if (current_screen_ == ScreenId::kFmEditor && report.size() > 3) {
+  if ((current_screen_ == ScreenId::kFmEditor ||
+       current_screen_ == ScreenId::kAwm2Editor) && report.size() > 3) {
     const uint8_t previous_panel = previous_hid_report_.size() > 3
                                        ? previous_hid_report_[3]
                                        : 0;
     if (report[3] == 0x80 && previous_panel != 0x80) {
-      fm_page_ = (fm_page_ + 14) % 15;
-      selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
-      fm_status_.clear();
+      if (current_screen_ == ScreenId::kFmEditor) {
+        fm_page_ = (fm_page_ + 14) % 15;
+        selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
+        fm_status_.clear();
+      } else {
+        awm_page_ = (awm_page_ + 38) % 39;
+      }
       ui_changed = true;
     } else if (report[3] == 0x20 && previous_panel != 0x20) {
-      fm_page_ = (fm_page_ + 1) % 15;
-      selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
-      fm_status_.clear();
+      if (current_screen_ == ScreenId::kFmEditor) {
+        fm_page_ = (fm_page_ + 1) % 15;
+        selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
+        fm_status_.clear();
+      } else {
+        awm_page_ = (awm_page_ + 1) % 39;
+      }
       ui_changed = true;
     }
   }
@@ -1810,10 +2036,21 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
     uint8_t previous = previous_jog_control;
     if (current != previous) {
       if (current == mk2::kJogLeft) {
-        if (current_screen_ == ScreenId::kFmEditor) {
+        if (current_screen_ == ScreenId::kAwm2Editor && awm_page_ == 0 &&
+            awm_overview_mode_ != AwmOverviewMode::kOverview) {
+          if (awm_overview_mode_ == AwmOverviewMode::kCategory) {
+            if (selected_awm_category_ >= 8) selected_awm_category_ -= 8;
+          } else {
+            const int page_start = (selected_awm_sound_ / 16) * 16;
+            if (selected_awm_sound_ >= page_start + 8)
+              selected_awm_sound_ -= 8;
+          }
+        } else if (current_screen_ == ScreenId::kFmEditor) {
           fm_page_ = (fm_page_ + 14) % 15;
           selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
           fm_status_.clear();
+        } else if (current_screen_ == ScreenId::kAwm2Editor) {
+          awm_page_ = (awm_page_ + 38) % 39;
         } else if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitColumn(-1);
         } else if (current_screen_ == ScreenId::kSetCcPc) {
@@ -1823,10 +2060,26 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
         }
         ui_changed = true;
       } else if (current == mk2::kJogRight) {
-        if (current_screen_ == ScreenId::kFmEditor) {
+        if (current_screen_ == ScreenId::kAwm2Editor && awm_page_ == 0 &&
+            awm_overview_mode_ != AwmOverviewMode::kOverview) {
+          if (awm_overview_mode_ == AwmOverviewMode::kCategory) {
+            if (selected_awm_category_ < 8)
+              selected_awm_category_ =
+                  std::min(selected_awm_category_ + 8, 14);
+          } else {
+            const auto sounds =
+                FilteredSoundPresets(1, selected_awm_category_);
+            const int page_start = (selected_awm_sound_ / 16) * 16;
+            if (selected_awm_sound_ < page_start + 8 &&
+                selected_awm_sound_ + 8 < static_cast<int>(sounds.size()))
+              selected_awm_sound_ += 8;
+          }
+        } else if (current_screen_ == ScreenId::kFmEditor) {
           fm_page_ = (fm_page_ + 1) % 15;
           selected_fm_header_action_ = fm_page_ == 0 ? 1 : 0;
           fm_status_.clear();
+        } else if (current_screen_ == ScreenId::kAwm2Editor) {
+          awm_page_ = (awm_page_ + 1) % 39;
         } else if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitColumn(1);
         } else if (current_screen_ == ScreenId::kSetCcPc) {
@@ -1836,7 +2089,10 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
         }
         ui_changed = true;
       } else if (current == mk2::kJogUp) {
-        if (current_screen_ == ScreenId::kKeySplit) {
+        if (current_screen_ == ScreenId::kAwm2Editor && awm_page_ == 0) {
+          MoveJogSelection(-1);
+          ui_changed = true;
+        } else if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitRow(-1);
           ui_changed = true;
         } else if (current_screen_ == ScreenId::kSetCcPc) {
@@ -1844,7 +2100,10 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
           ui_changed = true;
         }
       } else if (current == mk2::kJogDown) {
-        if (current_screen_ == ScreenId::kKeySplit) {
+        if (current_screen_ == ScreenId::kAwm2Editor && awm_page_ == 0) {
+          MoveJogSelection(1);
+          ui_changed = true;
+        } else if (current_screen_ == ScreenId::kKeySplit) {
           MoveKeySplitRow(1);
           ui_changed = true;
         } else if (current_screen_ == ScreenId::kSetCcPc) {
@@ -1929,6 +2188,22 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
         }
         continue;
       }
+      if (current_screen_ == ScreenId::kAwm2Editor &&
+          (knob_is_being_operated || last_touched_knob_ >= 0)) {
+        const int awm_knob = std::clamp(physical_knob, 0, 7);
+        std::array<uint8_t, 8>* values = nullptr;
+        if (awm_page_ < 5) values = &awm_common_[awm_page_];
+        else if (awm_page_ < 37)
+          values = &awm_elements_[(awm_page_ - 5) / 4][(awm_page_ - 5) % 4];
+        else values = &awm_insertions_[awm_page_ - 37];
+        if (GetAwmPageSpec(awm_page_).labels[awm_knob][0] != '-') {
+          (*values)[awm_knob] = static_cast<uint8_t>(std::clamp(
+              static_cast<int>((*values)[awm_knob]) +
+                  std::clamp(delta, -10, 10), 0, 127));
+          ui_changed = true;
+        }
+        continue;
+      }
 
       // In the track settings screens, LCD knob 1 edits Volume (0..100) and
       // knob 2 edits Pan (-50..50). Positive hardware deltas are clockwise;
@@ -1977,6 +2252,22 @@ void ControllerApp::HandleHidReport(const std::vector<uint8_t>& report) {
 }
 
 void ControllerApp::MoveJogSelection(int delta) {
+  if (current_screen_ == ScreenId::kAwm2Editor && awm_page_ == 0) {
+    if (awm_overview_mode_ == AwmOverviewMode::kOverview) {
+      selected_awm_element_ =
+          (selected_awm_element_ + delta % 8 + 8) % 8;
+    } else if (awm_overview_mode_ == AwmOverviewMode::kCategory) {
+      selected_awm_category_ =
+          (selected_awm_category_ + delta % 15 + 15) % 15;
+    } else {
+      const int count = static_cast<int>(
+          FilteredSoundPresets(1, selected_awm_category_).size());
+      if (count > 0)
+        selected_awm_sound_ =
+            (selected_awm_sound_ + delta % count + count) % count;
+    }
+    return;
+  }
   if (current_screen_ == ScreenId::kControllerHome) {
     constexpr int count = static_cast<int>(std::size(kHomeButtons));
     selected_home_button_ =
@@ -2510,12 +2801,53 @@ void ControllerApp::ConfirmJogSelection() {
   if (current_screen_ == ScreenId::kSeqtrakTrackSelect) {
     if (selected_seqtrak_track_ < 0) {
       current_screen_ = ScreenId::kSettings;
+    } else if (selected_seqtrak_track_ >= 0 && selected_seqtrak_track_ <= 8) {
+      awm_track_ = selected_seqtrak_track_;
+      awm_page_ = 0;
+      current_screen_ = ScreenId::kAwm2Editor;
+      std::fprintf(stderr, "controller_app: %s -> AWM2 Synth Editor UI\n",
+                   seqtrak::kTracks[awm_track_].name);
     } else if (selected_seqtrak_track_ == 9) {
       current_screen_ = ScreenId::kFmEditor;
       fm_page_ = 0;
       selected_fm_header_action_ = 1;
       fm_status_.clear();
       std::fprintf(stderr, "controller_app: DX -> FM Editor UI v2\n");
+    }
+    return;
+  }
+  if (current_screen_ == ScreenId::kAwm2Editor) {
+    if (awm_page_ == 0) {
+      if (awm_overview_mode_ == AwmOverviewMode::kOverview) {
+        auto& assigned = awm_elements_[selected_awm_element_][0][0];
+        assigned = assigned == 0 ? 1 : 0;
+        if (assigned != 0) {
+          selected_awm_category_ =
+              awm_element_categories_[selected_awm_element_];
+          awm_overview_mode_ = AwmOverviewMode::kCategory;
+        }
+      } else if (awm_overview_mode_ == AwmOverviewMode::kCategory) {
+        awm_element_categories_[selected_awm_element_] =
+            selected_awm_category_;
+        selected_awm_sound_ = 0;
+        awm_overview_mode_ = AwmOverviewMode::kSound;
+      } else {
+        const auto sounds =
+            FilteredSoundPresets(1, selected_awm_category_);
+        if (!sounds.empty()) {
+          selected_awm_sound_ = std::clamp(
+              selected_awm_sound_, 0, static_cast<int>(sounds.size()) - 1);
+          const auto& sound = *sounds[selected_awm_sound_];
+          awm_element_sound_numbers_[selected_awm_element_] = sound.number;
+          awm_element_sound_names_[selected_awm_element_] = sound.name;
+          awm_elements_[selected_awm_element_][0][1] =
+              static_cast<uint8_t>(sound.number & 0x7F);
+        }
+        awm_overview_mode_ = AwmOverviewMode::kOverview;
+      }
+    } else {
+      awm_page_ = 0;
+      awm_overview_mode_ = AwmOverviewMode::kOverview;
     }
     return;
   }
