@@ -14,7 +14,7 @@
 
 ## 参考動画
 
-実際の動作は[YouTube Shortsの参考動画](https://youtube.com/shorts/JJenPRUcGT0)で確認できます。
+実際の動作は[YouTubeの参考動画](https://youtu.be/JYyXQgCoOQ0)で確認できます。
 
 ## ディレクトリ構成
 
