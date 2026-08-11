@@ -1,5 +1,7 @@
 # S49 MK2 ⇄ SEQTRAK Raspberry Pi bridge
 
+[English](README.md) | [日本語](README.ja.md)
+
 Standalone C++ port of the `KompleteControl_MK2` Python protocol research
 (`資料/KompleteControl_MK2-main_extracted/`), targeting a headless
 Raspberry Pi that USB-hosts a hub with:
@@ -9,6 +11,10 @@ Raspberry Pi that USB-hosts a hub with:
 - YAMAHA SEQTRAK (11-track groovebox, MIDI in/out)
 
 and relays/bridges between them, with an internal step sequencer.
+
+## Demo video
+
+See the bridge running in this [YouTube Shorts video](https://youtube.com/shorts/JJenPRUcGT0).
 
 ## Layout
 
