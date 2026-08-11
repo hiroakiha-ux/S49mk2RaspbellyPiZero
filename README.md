@@ -10,7 +10,9 @@ Raspberry Pi that USB-hosts a hub with:
   LEDs, knobs, jog wheel, keybed)
 - YAMAHA SEQTRAK (11-track groovebox, MIDI in/out)
 
-and relays/bridges between them, with an internal step sequencer.
+and relays/bridges between them. A non-user-facing step-sequencer engine
+exists only as development scaffolding; pattern editing and playback control
+from the S49 MK2 are not implemented.
 
 ## Demo video
 
@@ -29,7 +31,7 @@ include/
   usb/                 HID (hidraw) + bulk LCD (libusb) device wrappers
   display/             RGB565 canvas + LCD packet builder
   midi/                ALSA rawmidi port + MK2<->SEQTRAK router
-  seq/                 Minimal internal step sequencer
+  seq/                 Step-sequencer engine scaffold (not user-operable)
   app/                 Application wiring + entry point
   util/                Hex-dump helpers shared by --dry-run logging and tests/
 src/                   Matching .cpp implementations
@@ -102,9 +104,9 @@ each one.
 ```
 
 On startup it opens the MK2 HID + LCD bulk endpoints, opens both MIDI
-ports, draws a static test frame to both LCDs, starts the MK2⇄SEQTRAK MIDI
-relay, and starts the internal step sequencer (empty pattern, 120 BPM,
-silent until steps are programmed). Ctrl-C stops cleanly.
+ports, draws a static test frame to both LCDs, and starts the MK2⇄SEQTRAK
+MIDI relay. Ctrl-C stops cleanly. An empty internal sequencer clock also
+runs, but there is currently no UI or app-layer path for programming steps.
 
 ### `--dry-run`
 
@@ -141,10 +143,12 @@ construction) before letting it actually touch either instrument.
 
 ## What's minimal / left as scaffolding
 
-- **Step sequencer**: fixed 16-step, one-note-per-step patterns per track,
-  driven by a simple clock thread. No swing, per-step probability,
-  automation, or persistence yet; `StepSequencer::SetStep` is the
-  programming entry point for a future MK2-pad-driven step editor.
+- **Step sequencer (not yet usable)**: only the internal engine scaffold is
+  implemented: fixed 16-step, one-note-per-step storage and a clock thread.
+  The app never calls `StepSequencer::SetStep`, and there is no S49 MK2 UI
+  for entering, editing, starting, or stopping patterns. The sequencer is
+  therefore not available as a user feature. Swing, per-step probability,
+  automation, and persistence are also unimplemented.
 - **MK2 -> SEQTRAK control mapping**: knobs and Function buttons are
   translated to the SEQTRAK's documented default CC assignment
   (`kDefaultKnobCcBase`/`kDefaultFunctionButtonCcBase` in
