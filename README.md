@@ -14,7 +14,7 @@ and relays/bridges between them, with an internal step sequencer.
 
 ## Demo video
 
-See the bridge running in this [YouTube Shorts video](https://youtube.com/shorts/JJenPRUcGT0).
+See the bridge running in this [YouTube video](https://youtu.be/JYyXQgCoOQ0).
 
 ## Layout
 
